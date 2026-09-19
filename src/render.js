@@ -28,6 +28,7 @@ async function atomicWrite(file, content) {
 
 function renderQuestion(question, index) {
   const lines = [`**题 ${index + 1}：${line(question.title)}**`];
+  for (const image of question.images || []) lines.push(`![题 ${index + 1} 配图](${image})`);
   for (const option of question.options || []) lines.push(`- ${line(option)}`);
   if (question.answer) lines.push(`- 已显示答案：${line(question.answer)}`);
   if (question.explanation) lines.push(`- 已显示解析：${line(question.explanation)}`);
@@ -85,6 +86,7 @@ export function renderQuizIndex(course, records) {
     for (const [index, question] of record.questions.entries()) {
       const time = question.time == null ? '' : `[${formatTime(question.time)}] `;
       lines.push(`${index + 1}. ${time}${line(question.title)}`);
+      for (const image of question.images || []) lines.push(`   ![题 ${index + 1} 配图](${image})`);
       for (const option of question.options || []) lines.push(`   - ${line(option)}`);
       if (question.answer) lines.push(`   - 已显示答案：${line(question.answer)}`);
       if (question.explanation) lines.push(`   - 已显示解析：${line(question.explanation)}`);

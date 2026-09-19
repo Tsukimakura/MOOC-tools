@@ -6,7 +6,7 @@ import { safeName, selectUnits } from './course.js';
 import { mergeQuestions } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const HELP = `mooc-notes 0.1.0 — 中国大学 MOOC 图文学习纪要
+const HELP = `mooc-notes 0.1.1 — 中国大学 MOOC 图文学习纪要
 
 用法：
   mooc-notes login [--browser 路径] [--profile 目录]
@@ -21,7 +21,7 @@ const HELP = `mooc-notes 0.1.0 — 中国大学 MOOC 图文学习纪要
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --unit TEXT          只导出匹配名称或 ID 的课时资源
   --interval SEC       视频截图采样间隔，默认 2 秒
-  --threshold NUMBER   画面变化阈值，默认 12
+  --threshold NUMBER   画面变化阈值，默认 1
   --max-frames NUMBER  每个视频截图上限，默认 160
   --scan-mode MODE     seek（快速跳播，默认）或 realtime（实际播放，适合驻点小测）
   --force              重新采集已完成的资源
@@ -71,9 +71,27 @@ async function login(page) {
   } else console.log('浏览器会话已保存。');
 }
 
+export function mergeCapturedRecord(previous, record, unit) {
+  const saved = previous ? {
+    ...record,
+    cues: record.cues.length ? record.cues : previous.cues || [],
+    screenshots: record.screenshots.length ? record.screenshots : previous.screenshots || [],
+    questions: mergeQuestions(record.questions || [], previous.questions || []),
+    attachments: record.attachments.length ? record.attachments : previous.attachments || [],
+    text: record.text || previous.text || '',
+    ok: record.ok || Boolean(previous.ok && (unit.type !== 'video' || previous.screenshots?.length))
+  } : record;
+  saved.warnings = saved.warnings.filter((warning) =>
+    !(warning === '未找到可读取的字幕。' && saved.cues.length) &&
+    !(warning === '视频播放器未加载，无法截图。' && saved.screenshots.length) &&
+    !(warning.startsWith('跳播扫描可能') && saved.questions.length)
+  );
+  return saved;
+}
+
 export async function main(argv) {
   const { options, positional } = parseArguments(argv);
-  if (options.version) { console.log('0.1.0'); return; }
+  if (options.version) { console.log('0.1.1'); return; }
   if (options.help || !positional.length) { console.log(HELP); return; }
   const [command, input] = positional;
   if (!['login', 'list', 'export', 'quizzes'].includes(command)) throw new Error(`未知命令：${command}`);
@@ -98,23 +116,22 @@ export async function main(argv) {
     for (const [index, unit] of resources.entries()) {
       const previous = manifest.records[unit.id];
       const hasQuestions = Boolean(previous?.questions?.length);
-      if (previous?.ok !== false && previous && !options.force && (command !== 'quizzes' || hasQuestions)) {
+      const complete = previous?.ok === true && (unit.type !== 'video' || Boolean(previous.screenshots?.length) || (command === 'quizzes' && hasQuestions));
+      if (complete && !options.force && (command !== 'quizzes' || hasQuestions)) {
         console.log(`[${index + 1}/${resources.length}] 跳过已采集：${unit.name}`);
         continue;
       }
       console.log(`[${index + 1}/${resources.length}] 采集 ${unit.type}：${unit.name}`);
-      const record = await captureUnit(page, unit, path.join(directory, 'assets'), { ...options, quizzesOnly: command === 'quizzes' });
-      manifest.records[unit.id] = command === 'quizzes' && previous ? {
-        ...previous,
-        questions: mergeQuestions(previous.questions || [], record.questions || []),
-        warnings: [...new Set([...(previous.warnings || []), ...record.warnings])].filter((warning) =>
-          !warning.startsWith('跳播扫描可能') || !(record.questions || []).length
-        ),
-        ok: record.ok
-      } : record;
+      const record = await captureUnit(page, unit, path.join(directory, 'assets'), {
+        ...options,
+        quizzesOnly: command === 'quizzes',
+        onProgress: (percent) => console.log(`  视频流处理 ${percent}%`)
+      });
+      const saved = mergeCapturedRecord(previous, record, unit);
+      manifest.records[unit.id] = saved;
       await saveExport(directory, manifest, course);
-      console.log(`  字幕 ${record.cues.length} 条，截图 ${record.screenshots.length} 张，题目 ${record.questions.length} 道`);
-      for (const warning of record.warnings) console.log(`  提示：${warning}`);
+      console.log(`  字幕 ${saved.cues.length} 条，截图 ${saved.screenshots.length} 张，题目 ${saved.questions.length} 道`);
+      for (const warning of saved.warnings) console.log(`  提示：${warning}`);
     }
     await saveExport(directory, manifest, course);
     console.log(`完成：${path.join(directory, 'notes.md')}；${path.join(directory, 'quizzes.md')}`);

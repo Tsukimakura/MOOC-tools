@@ -4,6 +4,37 @@ function plain(value) {
     .replace(/\s+/g, ' ').trim();
 }
 
+function imageUrls(html) {
+  if (typeof html !== 'string') return [];
+  return [...html.matchAll(/<img\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1/gi)]
+    .map((match) => match[2].replaceAll('&amp;', '&'));
+}
+
+// DWR responses are JavaScript assignments. Read only literal values and object links;
+// never execute code returned by the learning platform.
+export function questionsFromDwr(source) {
+  const variables = new Map();
+  for (const match of String(source).matchAll(/\bvar\s+s(\d+)\s*=\s*(\[\]|\{\})\s*;/g)) {
+    variables.set(match[1], match[2] === '[]' ? [] : Object.create(null));
+  }
+  const assignment = /\bs(\d+)(?:\.([A-Za-z_$][\w$]*)|\[(\d+)\])\s*=\s*("(?:\\.|[^"\\])*"|s\d+|null|true|false|-?\d+(?:\.\d+)?)\s*;/g;
+  for (const match of String(source).matchAll(assignment)) {
+    const target = variables.get(match[1]);
+    const key = match[2] ?? match[3];
+    if (!target || ['__proto__', 'constructor', 'prototype'].includes(key)) continue;
+    const raw = match[4];
+    let value;
+    if (/^s\d+$/.test(raw)) value = variables.get(raw.slice(1));
+    else if (raw.startsWith('"')) {
+      try { value = JSON.parse(raw.replaceAll("\\'", "'")); } catch { continue; }
+    } else if (raw === 'null') value = null;
+    else if (raw === 'true' || raw === 'false') value = raw === 'true';
+    else value = Number(raw);
+    target[key] = value;
+  }
+  return questionsFromData([...variables.values()]);
+}
+
 export function dedupeQuestions(questions) {
   const seen = new Set();
   return questions.filter((question) => {
@@ -26,10 +57,13 @@ export function questionsFromData(data, time = null) {
     visited.add(node);
     const options = node.optionDtos || node.options || node.choices || node.optionList;
     const title = node.plainTextTitle || node.questionTitle || node.title || node.stem;
-    if (title && Array.isArray(options)) {
+    if (title && (Array.isArray(options) || node.optionNumber != null || node.testId != null)) {
+      const rawOptions = Array.isArray(options) ? options : [];
       const question = {
+        id: String(node.id ?? ''),
         title: plain(title),
-        options: options.map((option) => plain(typeof option === 'string' ? option : option.content || option.text || option.title)).filter(Boolean),
+        options: rawOptions.map((option) => plain(typeof option === 'string' ? option : option.content || option.text || option.title)).filter(Boolean),
+        images: [...new Set([...(imageUrls(node.title)), ...rawOptions.flatMap((option) => imageUrls(typeof option === 'string' ? option : option.content || option.text || option.title))])],
         answer: '', explanation: '',
         time: Number.isFinite(time) ? time : normalizeTime(node)
       };
@@ -44,6 +78,7 @@ export function questionsFromData(data, time = null) {
 
 function normalizeTime(node) {
   for (const key of ['videoTime', 'pauseTime', 'questionTime', 'showTime', 'position']) {
+    if (node[key] === null || node[key] === undefined || node[key] === '') continue;
     const value = Number(node[key]);
     if (Number.isFinite(value) && value >= 0) return value > 24 * 3600 ? value / 1000 : value;
   }
@@ -76,7 +111,7 @@ export async function questionsFromPage(page, time = null) {
           }
           const answerNode = [...root.querySelectorAll('.answer, .correctAnswer, .j-answer')].find(visible);
           const explanationNode = [...root.querySelectorAll('.analysis, .explanation, .j-analysis, .analysisInfo')].find(visible);
-          return { title, options, answer: text(answerNode), explanation: text(explanationNode) };
+          return { title, options, images: [...root.querySelectorAll('img')].map((image) => image.getAttribute('src')).filter(Boolean), answer: text(answerNode), explanation: text(explanationNode) };
         });
       });
       results.push(...questions.map((question) => ({ ...question, time })));
@@ -94,6 +129,7 @@ export function mergeQuestions(...groups) {
     map.set(key, previous ? {
       ...previous,
       options: previous.options?.length ? previous.options : question.options,
+      images: [...new Set([...(previous.images || []), ...(question.images || [])])],
       answer: previous.answer || question.answer || '',
       explanation: previous.explanation || question.explanation || '',
       time: previous.time ?? question.time ?? null

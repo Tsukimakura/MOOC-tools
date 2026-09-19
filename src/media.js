@@ -3,8 +3,13 @@ import { dedupeCues, parseSubtitle } from './subtitles.js';
 export function sceneDifference(previous, current) {
   if (!previous || !current || previous.length !== current.length) return Infinity;
   let total = 0;
-  for (let i = 0; i < current.length; i++) total += Math.abs(current[i] - previous[i]);
-  return total / current.length;
+  let changed = 0;
+  for (let i = 0; i < current.length; i++) {
+    const difference = Math.abs(current[i] - previous[i]);
+    total += difference;
+    if (difference > 24) changed++;
+  }
+  return Math.max(total / current.length, changed * 200 / current.length);
 }
 
 export async function imageSignature(frame, png) {
@@ -27,7 +32,7 @@ export async function imageSignature(frame, png) {
   }, base64);
 }
 
-export async function findVideo(page, timeoutMs = 12_000) {
+export async function findVideo(page, timeoutMs = 45_000) {
   const until = Date.now() + timeoutMs;
   do {
     for (const frame of page.frames()) {
@@ -43,18 +48,24 @@ export async function findVideo(page, timeoutMs = 12_000) {
 
 export async function videoDuration(frame) {
   return frame.evaluate(async () => {
-    const video = document.querySelector('video');
-    if (!video) return null;
-    if (!Number.isFinite(video.duration) || !video.duration) {
-      video.muted = true;
-      video.play().catch(() => {});
-      await Promise.race([
-        new Promise((resolve) => video.addEventListener('loadedmetadata', resolve, { once: true })),
-        new Promise((resolve) => setTimeout(resolve, 8000))
-      ]);
-      video.pause();
+    const deadline = Date.now() + 30_000;
+    let lastPlayRequest = 0;
+    while (Date.now() < deadline) {
+      const video = document.querySelector('video');
+      if (video) {
+        if (Number.isFinite(video.duration) && video.duration > 0 && video.readyState >= 2 && video.videoWidth > 0) {
+          video.pause();
+          return video.duration;
+        }
+        if (Date.now() - lastPlayRequest >= 2_000) {
+          video.muted = true;
+          video.play().catch(() => {});
+          lastPlayRequest = Date.now();
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    return Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null;
+    return null;
   });
 }
 
@@ -64,14 +75,25 @@ export async function seekVideo(frame, target) {
     if (!video || !Number.isFinite(video.duration)) return null;
     video.pause();
     const goal = Math.min(Math.max(0, target), Math.max(0, video.duration - 0.1));
-    if (Math.abs(video.currentTime - goal) < 0.2) return video.currentTime;
-    return Promise.race([
-      new Promise((resolve) => {
-        video.addEventListener('seeked', () => resolve(video.currentTime), { once: true });
-        try { video.currentTime = goal; } catch { resolve(null); }
-      }),
-      new Promise((resolve) => setTimeout(() => resolve(null), 6000))
-    ]);
+    try { video.currentTime = goal; } catch { return null; }
+    const deadline = Date.now() + 20_000;
+    let lastPlayRequest = 0;
+    while (Date.now() < deadline) {
+      const current = document.querySelector('video');
+      if (!current || current !== video || current.error) return null;
+      if (Math.abs(current.currentTime - goal) < 1 && current.readyState >= 2 && current.videoWidth > 0) {
+        current.pause();
+        return current.currentTime;
+      }
+      if (current.paused && Date.now() - lastPlayRequest >= 2_000) {
+        current.muted = true;
+        current.play().catch(() => {});
+        lastPlayRequest = Date.now();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    video.pause();
+    return null;
   }, target);
 }
 
