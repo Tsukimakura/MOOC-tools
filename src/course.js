@@ -25,7 +25,8 @@ export function normalizeCourse(raw, details = {}) {
   const termId = String(details.termId || raw.id || raw.termId || '');
   const units = [];
   for (const [chapterIndex, chapter] of raw.chapters.entries()) {
-    for (const [lessonIndex, lesson] of (chapter.lessons || []).entries()) {
+    const lessons = chapter.lessons || [];
+    for (const [lessonIndex, lesson] of lessons.entries()) {
       for (const [unitIndex, unit] of (lesson.units || []).entries()) {
         const type = unitType(unit);
         if (!type) continue;
@@ -48,8 +49,32 @@ export function normalizeCourse(raw, details = {}) {
         });
       }
     }
+    const chapterQuizzes = chapter.quizs || chapter.quiz || chapter.tests || [];
+    for (const quiz of Array.isArray(chapterQuizzes) ? chapterQuizzes : []) {
+      const candidates = Array.isArray(quiz.units) && quiz.units.length ? quiz.units : [quiz];
+      for (const candidate of candidates) {
+        const id = String(candidate.id || quiz.id || '');
+        if (!/^\d+$/.test(id)) continue;
+        const quizId = String(quiz.id || id);
+        units.push({
+          id, contentId: String(candidate.contentId || ''), contentType: 5, type: 'quiz',
+          name: String(candidate.name || quiz.name || `章节测验 ${id}`),
+          chapter: String(chapter.name || `第 ${chapterIndex + 1} 章`), lesson: '章节测验',
+          chapterIndex, lessonIndex: lessons.length, unitIndex: units.length, lessonId: '', contentUrl: '',
+          url: `https://${HOST}/learn/${encodeURIComponent(slug)}?tid=${encodeURIComponent(termId)}#/learn/quiz?id=${encodeURIComponent(quizId)}`
+        });
+      }
+    }
   }
-  return { slug, termId, title: String(details.title || raw.courseName || raw.name || slug), units };
+  const seen = new Set();
+  return {
+    slug, termId, title: String(details.title || raw.courseName || raw.name || slug),
+    units: units.filter((unit) => {
+      if (seen.has(unit.id)) return false;
+      seen.add(unit.id);
+      return true;
+    })
+  };
 }
 
 export function unitType(unit) {
