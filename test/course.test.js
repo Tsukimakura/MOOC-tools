@@ -19,10 +19,11 @@ test('目录跨章节标准化并生成示例课时链接', () => {
     { id: 1320673525, contentId: 1217120150, contentType: 1, name: 'Video' },
     { id: 1320673528, contentId: 1258602372, contentType: 5, name: 'Quiz' },
     { id: 3, contentType: 6, name: 'Discussion' }
-  ] }] }] };
+  ] }], quizs: [{ id: 99, name: 'Chapter quiz', units: [{ id: 100, name: 'Quiz part' }] }] }] };
   const course = normalizeCourse(raw, { slug: 'ZJU1-1460402161', termId: '1488053496', title: 'Algorithms' });
-  assert.equal(course.units.length, 2);
-  assert.deepEqual(course.units.map((unit) => unit.type), ['video', 'quiz']);
+  assert.equal(course.units.length, 3);
+  assert.deepEqual(course.units.map((unit) => unit.type), ['video', 'quiz', 'quiz']);
   assert.match(course.units[0].url, /id=1278585470&cid=1320673525&contentid=1217120150/);
   assert.equal(selectUnits(course, '1320673528')[0].name, 'Quiz');
+  assert.match(course.units[2].url, /#\/learn\/quiz\?id=99$/);
 });
