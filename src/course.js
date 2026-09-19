@@ -37,6 +37,9 @@ export function normalizeCourse(raw, details = {}) {
           contentId: String(unit.contentId || unit.contentid || ''),
           contentType: Number(unit.contentType),
           type,
+          anchors: Array.isArray(unit.anchorQuestions) ? unit.anchorQuestions
+            .map((item) => ({ time: Number(item.anchor), id: String(item.questionId || '') }))
+            .filter((item) => Number.isFinite(item.time) && item.time >= 0 && /^\d+$/.test(item.id)) : [],
           name: String(unit.name || `资源 ${id}`),
           chapter: String(chapter.name || `第 ${chapterIndex + 1} 章`),
           lesson: String(lesson.name || `第 ${lessonIndex + 1} 节`),

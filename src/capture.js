@@ -1,10 +1,12 @@
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { findVideo, imageSignature, overlaySubtitle, sceneDifference, seekVideo, subtitleCuesFromPayloads, trackCues, videoDuration } from './media.js';
 import { dedupeCues, parseSubtitle } from './subtitles.js';
-import { mergeQuestions, questionsFromData, questionsFromPage } from './quiz.js';
+import { mergeQuestions, questionsFromData, questionsFromDwr, questionsFromPage } from './quiz.js';
 import { openUnit } from './browser.js';
+import { captureStreamFrames, fetchVideoStream } from './stream.js';
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -51,12 +53,24 @@ export function resourceUrlsFromDwr(text) {
   return [...new Set(matches)];
 }
 
+export function subtitleUrlsFromDwr(text) {
+  const direct = [];
+  for (const match of String(text || '').matchAll(/\.nosKey\s*=\s*"((?:\\.|[^"\\])*)"/g)) {
+    const key = decodeDwr(match[1]);
+    if (/^[A-Za-z0-9_-]{8,256}$/.test(key)) {
+      direct.push(`https://nos.netease.com/oc-caption-srt/${key}`);
+    }
+  }
+  const legacy = resourceUrlsFromDwr(text).filter((url) => /\.(?:srt|vtt)(?:[?#]|$)|caption|subtitle|downloadVideoSrt/i.test(url));
+  return [...new Set([...direct, ...legacy])];
+}
+
 export async function fetchUnitDwr(page, unit) {
   if (!/^\d+$/.test(unit.id) || !/^\d+$/.test(unit.contentId)) return '';
   const cookies = await page.browserContext().cookies('https://www.icourse163.org');
   const csrf = cookies.find((cookie) => cookie.name === 'NTESSTUDYSI')?.value;
   if (!csrf) return '';
-  return page.evaluate(async ({ unit, csrf }) => {
+  const request = async () => page.evaluate(async ({ unit, csrf }) => {
     const session = document.cookie.match(/(?:^|;\s*)JSESSIONID=([^;]+)/)?.[1] || '${scriptSessionId}';
     const body = [
       'callCount=1', `scriptSessionId=${session}190`, 'c0-scriptName=CourseBean',
@@ -65,10 +79,60 @@ export async function fetchUnitDwr(page, unit) {
       'c0-param2=number:0', `c0-param3=number:${unit.id}`, `batchId=${Date.now()}`
     ].join('\n');
     const response = await fetch(`/dwr/call/plaincall/CourseBean.getLessonUnitLearnVo.dwr?csrfKey=${encodeURIComponent(csrf)}`, {
-      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body,
+      signal: AbortSignal.timeout(30_000)
     });
     return response.ok ? response.text() : '';
   }, { unit: { id: unit.id, contentId: unit.contentId, contentType: unit.contentType }, csrf }).catch(() => '');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = await request();
+    if (result) return result;
+    await wait(500 * (attempt + 1));
+  }
+  return '';
+}
+
+export async function fetchVideoQuestions(page, unit) {
+  const anchors = (unit.anchors || []).filter((item) => Number.isFinite(item.time) && /^\d+$/.test(item.id));
+  if (!anchors.length) return [];
+  const csrf = (await page.browserContext().cookies('https://www.icourse163.org'))
+    .find((cookie) => cookie.name === 'NTESSTUDYSI')?.value;
+  if (!csrf) return [];
+  const request = () => page.evaluate(async ({ unitId, anchors, csrf }) => {
+    const session = document.cookie.match(/(?:^|;\s*)JSESSIONID=([^;]+)/)?.[1] || '${scriptSessionId}';
+    const lines = [
+      'callCount=1', `scriptSessionId=${session}190`, 'c0-scriptName=MocQuizBean',
+      'c0-methodName=fetchQuestions', 'c0-id=0',
+      'c0-param0=Object_Object:{id:reference:c0-e1,anchorQuestions:reference:c0-e2}',
+      `c0-e1=number:${unitId}`
+    ];
+    let next = 3;
+    const objects = [];
+    const nested = [];
+    for (const anchor of anchors) {
+      const timeRef = `c0-e${next++}`;
+      const idRef = `c0-e${next++}`;
+      const objectRef = `c0-e${next++}`;
+      nested.push(`${timeRef}=number:${anchor.time}`, `${idRef}=number:${anchor.id}`,
+        `${objectRef}=Object_Object:{anchor:reference:${timeRef},questionId:reference:${idRef}}`);
+      objects.push(`reference:${objectRef}`);
+    }
+    lines.push(`c0-e2=Array:[${objects.join(',')}]`, ...nested, `batchId=${Date.now()}`);
+    const result = await fetch(`/dwr/call/plaincall/MocQuizBean.fetchQuestions.dwr?csrfKey=${encodeURIComponent(csrf)}`, {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body: lines.join('\n'),
+      signal: AbortSignal.timeout(30_000)
+    });
+    return result.ok ? result.text() : '';
+  }, { unitId: unit.id, anchors, csrf }).catch(() => '');
+  const times = new Map(anchors.map((item) => [item.id, item.time]));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const questions = questionsFromDwr(await request()).map((question, index) => ({
+      ...question, time: times.get(question.id) ?? anchors[index]?.time ?? null
+    }));
+    if (questions.length >= anchors.length || questions.length && attempt === 2) return questions;
+    await wait(500 * (attempt + 1));
+  }
+  return [];
 }
 
 function allowedResource(url) {
@@ -120,9 +184,28 @@ export async function fetchResource(page, url, limit = 50_000_000) {
 function questionPayloads(payloads) {
   const questions = [];
   for (const item of payloads.filter((item) => item.kind === 'question')) {
-    try { questions.push(...questionsFromData(JSON.parse(item.text))); } catch { /* Some endpoints use DWR JavaScript. */ }
+    try { questions.push(...questionsFromData(JSON.parse(item.text))); }
+    catch { questions.push(...questionsFromDwr(item.text)); }
   }
   return questions;
+}
+
+async function downloadQuestionImages(page, record, assetDir) {
+  let imageIndex = 0;
+  for (const question of record.questions) {
+    const images = [];
+    for (const url of question.images || []) {
+      try {
+        const resource = await fetchResource(page, url, 8_000_000);
+        if (!resource || !/^image\/(?:jpeg|png|webp)/i.test(resource.type)) continue;
+        const extension = resource.type.includes('png') ? 'png' : resource.type.includes('webp') ? 'webp' : 'jpg';
+        const file = `question-${String(++imageIndex).padStart(3, '0')}.${extension}`;
+        await writeFile(path.join(assetDir, file), resource.bytes);
+        images.push(`assets/${record.id}/${file}`);
+      } catch { /* Unavailable question images are skipped. */ }
+    }
+    question.images = images;
+  }
 }
 
 export async function captureUnit(page, unit, assetRoot, options = {}) {
@@ -131,12 +214,17 @@ export async function captureUnit(page, unit, assetRoot, options = {}) {
   const assetDir = path.join(assetRoot, unit.id);
   await mkdir(assetDir, { recursive: true });
   try {
-    await openUnit(page, unit);
     let dwr = '';
-    if (unit.type !== 'quiz') dwr = await fetchUnitDwr(page, unit);
-    if (unit.type === 'video') await captureVideo(page, record, assetDir, options, dwr);
-    else if (unit.type === 'document') await captureDocument(page, record, assetDir, dwr);
-    else await captureQuiz(page, record, assetDir);
+    if (unit.type !== 'quiz' && !options.quizzesOnly) dwr = await fetchUnitDwr(page, unit);
+    if (unit.type === 'video') record.questions = await fetchVideoQuestions(page, unit);
+    if (unit.type === 'video' && options.quizzesOnly && unit.anchors?.length && record.questions.length >= unit.anchors.length) {
+      record.captureComplete = true;
+    } else {
+      await openUnit(page, unit);
+      if (unit.type === 'video') record.captureComplete = await captureVideo(page, record, assetDir, options, dwr);
+      else if (unit.type === 'document') await captureDocument(page, record, assetDir, dwr);
+      else await captureQuiz(page, record, assetDir);
+    }
   } catch (error) {
     record.warnings.push(`采集失败：${error.message}`);
   }
@@ -144,30 +232,73 @@ export async function captureUnit(page, unit, assetRoot, options = {}) {
   const payloads = await observer.stop();
   record.cues = dedupeCues([...record.cues, ...subtitleCuesFromPayloads(payloads)]);
   record.questions = mergeQuestions(record.questions, questionPayloads(payloads));
+  await downloadQuestionImages(page, record, assetDir);
   if (unit.type === 'video' && !record.cues.length) record.warnings.push('未找到可读取的字幕。');
   if (unit.type === 'quiz' && !record.questions.length) record.warnings.push('此 Quiz 的题目未在当前学习页面显示；未自动开始答题。');
-  record.ok = !record.warnings.some((warning) => warning.startsWith('采集失败：'));
+  record.ok = (unit.type !== 'quiz' || record.questions.length > 0) &&
+    (record.captureComplete !== false || (options.quizzesOnly && record.questions.length > 0)) &&
+    !record.warnings.some((warning) => warning.startsWith('采集失败：'));
+  delete record.captureComplete;
   delete record.contentUrl;
   return record;
 }
 
 async function captureVideo(page, record, assetDir, options, dwr) {
-  const video = await findVideo(page);
-  if (!video) {
-    record.warnings.push('视频播放器未加载，无法截图。');
-    return;
-  }
-  const duration = await videoDuration(video.frame);
-  if (!duration) {
-    record.warnings.push('无法读取视频时长，无法按时间采样截图。');
-    return;
-  }
-  const subtitleUrls = resourceUrlsFromDwr(dwr).filter((url) => /\.(?:srt|vtt)(?:[?#]|$)/i.test(url));
+  const framePrefix = `frame-${randomUUID().slice(0,8)}`;
+  const subtitleUrls = subtitleUrlsFromDwr(dwr);
   for (const url of subtitleUrls) {
     try {
       const resource = await fetchResource(page, url, 5_000_000);
       if (resource) record.cues.push(...parseSubtitle(resource.bytes.toString('utf8')));
     } catch { /* Subtitle URLs may expire. */ }
+  }
+  let streamIssue = '';
+  if (options.scanMode !== 'realtime' && !options.quizzesOnly) {
+    try {
+      let stream;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { stream = await fetchVideoStream(page, record); break; }
+        catch (error) {
+          if (attempt === 2) throw error;
+          await wait(750 * (attempt + 1));
+        }
+      }
+      if (!record.cues.length) {
+        for (const url of stream.captions) {
+          const resource = await fetchResource(page, url, 5_000_000);
+          if (resource) record.cues.push(...parseSubtitle(resource.bytes.toString('utf8')));
+        }
+      }
+      record.cues = dedupeCues(record.cues);
+      await captureStreamFrames(page, stream, assetDir, record, { ...options, framePrefix });
+      if (record.screenshots.length) return true;
+      streamIssue = '视频流没有产生可见画面。';
+    } catch (error) {
+      streamIssue = error.code === 'ENOENT' ? '未找到 ffmpeg；安装后可在播放器失败时从视频流提取截图。' : error.message;
+    }
+  }
+  let video = await findVideo(page, 20_000);
+  if (!video) {
+    await page.evaluate((id) => {
+      const tab = [...document.querySelectorAll('li[data-id]')].find((element) => element.dataset.id === id);
+      tab?.click();
+    }, record.id).catch(() => {});
+    video = await findVideo(page, 10_000);
+  }
+  if (!video) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 45_000 });
+    video = await findVideo(page, 30_000);
+  }
+  if (!video) {
+    if (streamIssue) record.warnings.push(`视频流截图后备失败：${streamIssue}`);
+    record.warnings.push('视频播放器未加载，无法截图。');
+    return false;
+  }
+  const duration = await videoDuration(video.frame);
+  if (!duration) {
+    if (streamIssue) record.warnings.push(`视频流截图后备失败：${streamIssue}`);
+    record.warnings.push('无法读取视频时长，无法按时间采样截图。');
+    return false;
   }
   record.cues.push(...await trackCues(video.frame));
   record.cues = dedupeCues(record.cues);
@@ -175,7 +306,7 @@ async function captureVideo(page, record, assetDir, options, dwr) {
   const maxFrames = options.maxFrames ?? 160;
   const minGap = options.minGap ?? 3;
   const maxSilentGap = options.maxSilentGap ?? 60;
-  const threshold = options.threshold ?? 12;
+  const threshold = options.threshold ?? 1;
   let lastSignature = null;
   let lastCapture = -Infinity;
   const observedQuestions = [];
@@ -185,14 +316,16 @@ async function captureVideo(page, record, assetDir, options, dwr) {
     const subtitle = await overlaySubtitle(video.frame, actual);
     if (subtitle) observedCues.push(subtitle);
     if (options.quizzesOnly || record.screenshots.length >= maxFrames) return;
-    const png = await video.element.screenshot({ type: 'png' });
+    const element = await video.frame.$('video');
+    if (!element) return;
+    const png = await element.screenshot({ type: 'png' });
     const signature = await imageSignature(video.frame, png);
     const average = signature.reduce((sum, value) => sum + value, 0) / signature.length;
     if (average < 6) return;
     const changed = sceneDifference(lastSignature, signature) >= threshold;
     const timedFallback = record.cues.length > 0 && actual - lastCapture >= maxSilentGap;
     if (actual - lastCapture >= minGap && (changed || timedFallback)) {
-      const file = `frame-${String(record.screenshots.length + 1).padStart(4, '0')}.png`;
+      const file = `${framePrefix}-${String(record.screenshots.length + 1).padStart(4, '0')}.png`;
       await writeFile(path.join(assetDir, file), png);
       record.screenshots.push({ time: actual, file: `assets/${record.id}/${file}` });
       lastSignature = signature;
@@ -235,23 +368,28 @@ async function captureVideo(page, record, assetDir, options, dwr) {
     for (let time = interval; time < duration; time += interval) targets.add(Number(time.toFixed(2)));
     for (const cue of record.cues) if (cue.start < duration) targets.add(Math.max(0, Number(cue.start.toFixed(2))));
     const times = [...targets].sort((a, b) => a - b);
+    let failedSeeks = 0;
     for (const time of times) {
       const actual = await seekVideo(video.frame, time);
       if (actual === null) {
-        record.warnings.push(`在 ${time.toFixed(1)} 秒无法定位视频；后续截图未采集。`);
+        failedSeeks++;
+        if (failedSeeks < 3) continue;
+        record.warnings.push(`连续三次无法定位视频，在 ${time.toFixed(1)} 秒停止截图。`);
         break;
       }
+      failedSeeks = 0;
       await wait(160);
       await sample(actual);
     }
   }
-  record.questions = mergeQuestions(observedQuestions);
+  record.questions = mergeQuestions(record.questions, observedQuestions);
   if (!record.cues.length) record.cues = dedupeCues(observedCues.filter((cue, index, all) =>
     index === 0 || cue.text !== all[index - 1].text
   ));
   if (!options.quizzesOnly && record.screenshots.length >= maxFrames) record.warnings.push(`截图达到上限 ${maxFrames} 张；可用 --max-frames 调整。`);
   if (!options.quizzesOnly && !record.screenshots.length) record.warnings.push('未能截取非黑屏画面。');
   if (options.scanMode !== 'realtime' && !record.questions.length) record.warnings.push('跳播扫描可能无法触发驻点小测；若此视频有小测，可用 --scan-mode realtime 重新采集。');
+  return Boolean(options.quizzesOnly || record.screenshots.length);
 }
 
 async function captureDocument(page, record, assetDir, dwr) {

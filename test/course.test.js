@@ -16,7 +16,7 @@ test('课程链接、编号和数字 ID 解析', () => {
 
 test('目录跨章节标准化并生成示例课时链接', () => {
   const raw = { id: 1488053496, chapters: [{ name: 'Lecture 1', lessons: [{ id: 1278585470, name: '1.1', units: [
-    { id: 1320673525, contentId: 1217120150, contentType: 1, name: 'Video' },
+    { id: 1320673525, contentId: 1217120150, contentType: 1, name: 'Video', anchorQuestions: [{ anchor: 73, questionId: 1388670745 }] },
     { id: 1320673528, contentId: 1258602372, contentType: 5, name: 'Quiz' },
     { id: 3, contentType: 6, name: 'Discussion' }
   ] }], quizs: [{ id: 99, name: 'Chapter quiz', units: [{ id: 100, name: 'Quiz part' }] }] }] };
@@ -24,6 +24,7 @@ test('目录跨章节标准化并生成示例课时链接', () => {
   assert.equal(course.units.length, 3);
   assert.deepEqual(course.units.map((unit) => unit.type), ['video', 'quiz', 'quiz']);
   assert.match(course.units[0].url, /id=1278585470&cid=1320673525&contentid=1217120150/);
+  assert.deepEqual(course.units[0].anchors, [{ time: 73, id: '1388670745' }]);
   assert.equal(selectUnits(course, '1320673528')[0].name, 'Quiz');
   assert.match(course.units[2].url, /#\/learn\/quiz\?id=99$/);
 });
