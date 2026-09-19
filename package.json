@@ -1,0 +1,20 @@
+{
+  "name": "mooc-notes-cli",
+  "version": "0.1.0",
+  "description": "Export personal study notes from China University MOOC courses",
+  "type": "module",
+  "bin": {
+    "mooc-notes": "./bin/mooc-notes.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check bin/mooc-notes.js && node --check src/browser.js && node --check src/capture.js && node --check src/cli.js && node --check src/course.js && node --check src/media.js && node --check src/quiz.js && node --check src/render.js && node --check src/subtitles.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.11.0"
+  },
+  "license": "MIT"
+}

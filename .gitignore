@@ -1,0 +1,7 @@
+node_modules/
+downloads/
+.mooc-notes/
+*.log
+.DS_Store
+.env
+coverage/
