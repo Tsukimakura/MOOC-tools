@@ -1,0 +1,7 @@
+.github/
+test/
+downloads/
+node_modules/
+.mooc-notes/
+*.log
+.env
