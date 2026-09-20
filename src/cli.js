@@ -1,15 +1,16 @@
 import path from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
-import { launchSession, loadAccountCourses, loadCourse } from './browser.js';
+import { launchSession } from './browser.js';
+import { MoocApi, readSession, saveSession, syncBrowserSession } from './api.js';
 import { captureUnit } from './capture.js';
 import { safeName, selectUnits } from './course.js';
 import { openInPlayer } from './player.js';
 import { askText, choose } from './prompt.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
-import { fetchVideoStream } from './stream.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -27,8 +28,8 @@ video-url 只向标准输出写入视频链接，便于复制或传给播放器�
 
 选项：
   --browser PATH       Chrome/Chromium 可执行文件
-  --profile DIR        浏览器本机会话目录
-  --headless           使用已有会话无界面运行
+  --profile DIR        浏览器本机会话目录；API 会话按此目录隔离
+  --headless           需要网页采集时无界面运行
   --player PATH        play 使用的播放器；也可设置 MOOC_NOTES_PLAYER
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --unit TEXT          只导出匹配名称或 ID 的课时资源
@@ -75,15 +76,16 @@ function parseArguments(argv) {
   return { options, positional };
 }
 
-async function login(page) {
+async function login(page, profile) {
   await page.goto('https://www.icourse163.org/', { waitUntil: 'domcontentloaded', timeout: 45_000 });
   console.log('浏览器已打开。请在其中完成登录，然后回到终端。');
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try { await prompt.question('登录完成后按 Enter 保存本机会话…'); } finally { prompt.close(); }
   const cookies = await page.browserContext().cookies('https://www.icourse163.org');
+  await saveSession(cookies, profile);
   if (!cookies.some((cookie) => cookie.name === 'STUDY_SESS' || cookie.name === 'STUDY_PERSIST')) {
-    console.log('浏览器会话已保存；未能确认登录状态，运行 list 可进一步验证。');
-  } else console.log('浏览器会话已保存。');
+    console.log('会话已保存；未能确认登录状态，运行 courses 可进一步验证。');
+  } else console.log('会话已保存。');
 }
 
 export function mergeCapturedRecord(previous, record, unit) {
@@ -111,11 +113,11 @@ function requireTerminal(message) {
   if (!process.stdin.isTTY) throw new Error(message);
 }
 
-async function chooseCourse(page) {
+async function chooseCourse(api) {
   requireTerminal('未提供课程；请传入课程代码或链接，或在终端中运行交互菜单。');
   process.stderr.write('正在读取账号中的课程…\n');
   let courses = [];
-  try { courses = await loadAccountCourses(page); }
+  try { courses = await api.accountCourses(); }
   catch (error) { process.stderr.write(`账号课程列表暂不可用：${error.message}\n`); }
   if (!courses.length) return askText('请输入课程代码或链接');
   const selected = await choose(courses.map((course) => ({
@@ -151,16 +153,35 @@ async function chooseResources(course, command, options) {
   return [unit];
 }
 
-async function videoStreamWithRetry(page, unit) {
+async function videoStreamWithRetry(api, unit) {
   let lastError;
   for (let attempt = 0; attempt < 3; attempt++) {
-    try { return await fetchVideoStream(page, unit); }
+    try { return await api.videoStream(unit); }
     catch (error) {
       lastError = error;
       if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 750 * (attempt + 1)));
     }
   }
   throw lastError;
+}
+
+async function saveApiQuestionImages(api, questions, directory, unitId) {
+  let index = 0;
+  for (const question of questions) {
+    const files = [];
+    for (const url of question.images || []) {
+      const image = await api.resource(url).catch(() => null);
+      if (!image) return false;
+      const extension = image.type.includes('png') ? 'png' : image.type.includes('webp') ? 'webp' : 'jpg';
+      const name = `question-${String(++index).padStart(3, '0')}.${extension}`;
+      const assetDir = path.join(directory, 'assets', unitId);
+      await mkdir(assetDir, { recursive: true });
+      await writeFile(path.join(assetDir, name), image.bytes);
+      files.push(`assets/${unitId}/${name}`);
+    }
+    question.images = files;
+  }
+  return true;
 }
 
 export async function main(argv) {
@@ -187,11 +208,29 @@ export async function main(argv) {
   if (positional.length > (['login', 'courses'].includes(command) ? 1 : 2)) throw new Error('命令中有多余的位置参数。');
   if (command === 'login' && options.headless) throw new Error('login 需要打开可见浏览器，请移除 --headless。');
   options.scanMode ||= command === 'quizzes' ? 'realtime' : 'seek';
-  const { browser, page } = await launchSession(options);
+  if (command === 'login') {
+    const { browser, page, userDataDir } = await launchSession(options);
+    try { await login(page, userDataDir); } finally { await browser.close(); }
+    return;
+  }
+  let cookies = await readSession(options.profile);
+  if (!cookies) {
+    process.stderr.write('首次迁移已有浏览器会话…\n');
+    cookies = await syncBrowserSession(options);
+  }
+  const api = new MoocApi(cookies);
+  let browser;
+  let page;
+  const getPage = async () => {
+    if (!page) {
+      ({ browser, page } = await launchSession(options));
+      await page.goto('https://www.icourse163.org/', { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    }
+    return page;
+  };
   try {
-    if (command === 'login') { await login(page); return; }
     if (command === 'courses') {
-      const courses = await loadAccountCourses(page);
+      const courses = await api.accountCourses();
       if (!courses.length) { console.log('当前账号没有可列出的中国大学 MOOC 课程。'); return; }
       console.log(`当前账号的课程（${courses.length} 门）`);
       for (const [index, course] of courses.entries()) {
@@ -199,7 +238,7 @@ export async function main(argv) {
       }
       return;
     }
-    const course = await loadCourse(page, input || await chooseCourse(page));
+    const course = await api.course(input || await chooseCourse(api));
     if (command === 'video-url' || command === 'play') {
       const unit = await chooseVideo(course, options.unit);
       let player;
@@ -210,7 +249,7 @@ export async function main(argv) {
           player = await askText('请输入播放器程序路径或命令');
         }
       }
-      const stream = await videoStreamWithRetry(page, unit);
+      const stream = await videoStreamWithRetry(api, unit);
       if (command === 'video-url') console.log(stream.url);
       else {
         await openInPlayer(player, stream.url);
@@ -237,7 +276,22 @@ export async function main(argv) {
         continue;
       }
       console.log(`[${index + 1}/${resources.length}] 采集 ${unit.type}：${unit.name}`);
-      const record = await captureUnit(page, unit, path.join(directory, 'assets'), {
+      let record;
+      if (command === 'quizzes' && unit.type === 'video' && unit.anchors?.length) {
+        let questions = [];
+        try { questions = await api.videoQuestions(unit); }
+        catch (error) { console.log(`  题目接口不可用，尝试网页采集：${error.message}`); }
+        if (missingVideoAnchors(unit.anchors, questions).length === 0 &&
+          await saveApiQuestionImages(api, questions, directory, unit.id)) {
+          const unanswered = questions.filter((question) => !question.answer).length;
+          record = {
+            ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
+            warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
+          };
+          delete record.contentUrl;
+        }
+      }
+      record ||= await captureUnit(await getPage(), unit, path.join(directory, 'assets'), {
         ...options,
         quizzesOnly: command === 'quizzes',
         onProgress: (percent) => console.log(`  视频流处理 ${percent}%`)
@@ -251,6 +305,6 @@ export async function main(argv) {
     await saveExport(directory, manifest, course);
     console.log(`完成：${path.join(directory, 'notes.md')}；${path.join(directory, 'quizzes.md')}`);
   } finally {
-    await browser.close();
+    if (browser) await browser.close();
   }
 }
