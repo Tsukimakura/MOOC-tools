@@ -1,15 +1,10 @@
 # mooc-notes-cli
 
-将中国大学 MOOC 中自己有权访问的课程，整理成可搜索的图文学习纪要。工具按视频时间线合并字幕、画面变化截图和驻点小测，也采集可见的课后或章节 Quiz 与可下载课件。输出为一个 `notes.md`、一个 `quizzes.md` 和本地附件目录。
+把自己已参加的中国大学 MOOC 课程整理成 Markdown 学习纪要。工具按视频时间线合并字幕、稳定画面截图和驻点小测，也整理课后 Quiz 与可获取的课件。另有小测索引，便于按教学小节查找。
 
-> 当前版本为 `0.4.0`。课程页面和接口会变化；首次使用请先用一个教学小节验证输出。工具不会自动开始或提交测验。视频截图按间隔采样，两个采样点之间的短暂变化可能遗漏。
+## 安装
 
-## 环境与安装
-
-- Node.js 20 或更新版本
-- Chrome 或 Chromium 浏览器：首次登录、旧会话迁移，以及 API 无法获取内容时的网页补采
-- `ffmpeg`：常规视频截图使用它直接处理视频流；未安装时才尝试网页播放器
-- 已参加的中国大学 MOOC 课程
+需要 Node.js 20+。视频截图需要 `ffmpeg`；首次登录和网页补采需要 Chrome 或 Chromium。
 
 ```bash
 npm ci
@@ -17,101 +12,80 @@ npm link
 mooc-notes --help
 ```
 
-`puppeteer-core` 不会自动安装浏览器。若 Chrome 不在常见安装位置，设置 `MOOC_NOTES_BROWSER` 为浏览器可执行文件路径，或每次使用 `--browser PATH`。
+`puppeteer-core` 不会安装浏览器。浏览器不在常见位置时，可设置 `MOOC_NOTES_BROWSER` 或使用 `--browser PATH`。
 
-## 快速开始
-
-```bash
-# 首次打开独立浏览器窗口，自己完成登录；会话保存在本机用户目录
-mooc-notes login
-
-# 打开交互式菜单：选操作、从账号课程列表中选课，或手动输入课程代码
-mooc-notes
-
-# 只列出当前账号中的课程与期次
-mooc-notes courses
-
-# 查看课程目录；优先使用完整链接或 ZJU1-1460402161 形式的课程编号
-mooc-notes list 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496'
-
-# 在终端中选择教学小节，汇总该节视频、课件和 Quiz
-mooc-notes export 'ZJU1-1460402161' --output ./downloads/my-course
-
-# 直接指定教学小节，采集该小节的全部资源
-mooc-notes export 'ZJU1-1460402161' --lesson 1278585469 --output ./downloads/my-course
-
-# 仅采集一个指定资源，例如一段视频
-mooc-notes export 'ZJU1-1460402161' --unit '1320673525' --output ./downloads/my-course
-
-# 只使用 API 与 ffmpeg，不启动浏览器；接口缺失会写入纪要提示
-mooc-notes export 'ZJU1-1460402161' --unit '1320673525' --api-only
-
-# 明确需要整门课程时才批量采集
-mooc-notes export 'ZJU1-1460402161' --all --output ./downloads/my-course
-
-# 单独整理驻点小测和课后 Quiz；优先读取时间锚点，必要时播放视频
-mooc-notes quizzes 'ZJU1-1460402161' --unit 1320673525 --output ./downloads/my-course
-```
-
-登录后，`courses`、`list`、`video-url`、`play` 直接请求课程接口，不会启动浏览器。常规 `export` 现在也直接读取字幕和视频流，由 `ffmpeg` 截图并筛选稳定画面；可直接下载的 PDF 课件和 Quiz 同样优先走 API。只有接口缺项、媒体处理失败、课件仅在网页显示，或选择 `--scan-mode realtime` 时才打开浏览器。若要完全禁止浏览器补采，可加 `--api-only`；网页专属内容会标记缺失。以前版本的浏览器会话会在首次运行时自动迁移一次；之后 API 操作只读取本地会话文件。如果会话失效，重新运行 `mooc-notes login`。
-
-`list`、`export`、`quizzes`、`video-url` 和 `play` 都可省略课程参数，在终端中从账号课程列表选择，也可手动输入课程代码或链接。菜单用 ↑/↓ 滚动选择，直接输入关键词筛选，Enter 确认，Esc 清除筛选或退出；PageUp/PageDown 快速翻动。`export` 和 `quizzes` 的交互菜单按教学小节选择，该节内的视频、课件与 Quiz 一起处理；`--lesson` 可在脚本中指定小节，`--unit` 只选单项资源，`--all` 才批量处理整门课程。
-
-## 在自己的播放器中观看
+## 使用
 
 ```bash
-# 先用 courses、list 查找课程，再根据课时 ID 取得视频链接
-mooc-notes video-url 'ZJU1-1460402161' --unit 1320673525
-
-# 在交互式终端中省略课程和课时，通过菜单选择
-mooc-notes video-url
-
-# 直接用 mpv 播放；也可将路径换成 VLC、PotPlayer 等播放器程序
-mooc-notes play 'ZJU1-1460402161' --unit 1320673525 --player mpv
-
-# 经常使用同一播放器时，设置环境变量后直接运行
-MOOC_NOTES_PLAYER=mpv mooc-notes play 'ZJU1-1460402161' --unit 1320673525
+mooc-notes login   # 首次在浏览器中登录，按提示回终端保存会话
+mooc-notes         # 交互菜单：选操作、课程、教学小节
 ```
 
-`video-url` 仅将 URL 写到标准输出，方便复制或在脚本中传递。`play` 将 URL 作为一个参数交给指定播放器，不经过 shell。播放器需支持平台提供的 HLS 或 MP4 链接；URL 含有会过期的授权参数，失效后重新运行命令即可。`--player` 接受可执行文件路径或系统可找到的命令，亦兼容 `VIDEO_OPENER` 环境变量。菜单的交互方式参考 [PTA-tools](https://github.com/Tsukimakura/PTA-tools)；播放流程参考 [ZJU-live-better 的 getVideoURL.js](https://github.com/5dbwat4/ZJU-live-better/blob/main/classroom.zju/getVideoURL.js)，本项目访问的仍是中国大学 MOOC 课程。
+菜单支持方向键、关键词筛选与 Enter 确认。选课时可以从账号课程中选择，也可以手动输入课程 ID 或链接。**默认只处理一个教学小节**；只有 `--all` 才处理整门课程。
 
-`export` 默认以 2 秒间隔从课程提供的视频流取帧，检测画面变化后等待连续稳定的采样点，再保存截图；需要 `ffmpeg`。视频流需要读取整节视频。终端会显示当前阶段、已用时间，以及有可计算进度时的进度条；若视频 CDN 连续 60 秒没有新画面，会停止该流并尝试网页补采。跨境网络较慢时，先观察“等待视频 CDN”提示，再考虑重试。`quizzes` 优先直接读取课程公布的驻点时间、题目和答案，并核对驻点数量；缺少题目时才播放视频。课程没有提供答案时会在文档中明确提示。发现视频中有驻点小测却未被采集时，使用 `--scan-mode realtime --force` 实际播放该课时。实时模式将播放器静音并以 2 倍速播放；遇到需要学员操作的小测会保存当前可见题目并停止该视频的后续扫描。可用 `--interval 1` 提高截图密度，`--threshold 0.5` 增加小幅画面变化的截图，`--max-frames` 调整每个视频的截图上限。
+脚本中使用统一格式 `mooc-notes [课程] --mode 模式`。模式如下：
 
-重复执行会跳过 `manifest.json` 中已完成的资源；没有截图的视频会继续重试。`--force` 重新采集，并保留先前成功取得的字幕、截图和题目。建议先运行 `list` 找到资源 ID，再用 `--unit` 试导出。无图形界面的服务器可在已经登录后使用 `--headless` 运行网页采集；首次登录仍需可见浏览器。
+| 模式 | 用途 |
+| --- | --- |
+| `notes`（默认） | 导出字幕、截图、课件和小测 |
+| `quizzes` | 仅收集视频驻点小测和课后 Quiz |
+| `list` | 查看课程目录与资源 ID |
+| `courses` | 查看账号课程与期次，无须课程参数 |
+| `url` | 获取一个视频的授权链接，仅将链接写到标准输出 |
+| `play` | 用指定的本地播放器打开视频 |
 
-## 输出示例
+课程参数示例：
+
+- 课程编号：`ZJU1-1460402161`
+- 纯数字课程 ID：`1460402161`
+- 含期次的完整链接：`https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496`
+
+课程编号或纯数字 ID 需要当前账号已参加课程，工具会从账号课程列表解析期次。完整链接中的 `tid` 可直接指定期次。以上是公开课程标识示例，不是账号标识；课程可用性仍取决于当前登录会话。
+
+```bash
+# 列出账号中的课程与期次
+mooc-notes --mode courses
+
+# 查看目录，找出教学小节和资源 ID
+mooc-notes 'ZJU1-1460402161' --mode list
+
+# 导出一段指定视频；也可用 --lesson 1278585470 导出整个教学小节
+mooc-notes 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496' --unit 1320673525
+
+# 只整理该教学小节的全部驻点小测与课后 Quiz
+mooc-notes 1460402161 --mode quizzes --lesson 1278585470
+
+# 获取视频链接，或交给自己的播放器
+mooc-notes ZJU1-1460402161 --mode url --unit 1320673525
+mooc-notes ZJU1-1460402161 --mode play --unit 1320673525 --player mpv
+```
+
+`--unit` 选单项资源，`--lesson` 选一个教学小节，`--all` 明确选整门课程。`--output DIR` 更改输出目录；`--force` 重新采集已有资源。使用 `--api-only` 可禁止网页补采。视频采样可用 `--interval SEC`、`--threshold NUMBER` 和 `--max-frames NUMBER` 调整；`--scan-mode realtime` 在浏览器中实际播放，适合检查接口未提供的驻点小测。查看完整参数运行 `mooc-notes --help`。
+
+## 输出与工作方式
+
+默认输出到 `downloads/<课程编号>-<期次>/`：
 
 ```text
-downloads/my-course/
-├── notes.md          # 全课学习纪要，字幕、截图、题目按时间排列
-├── quizzes.md        # 按章节、课时汇总的题目索引
-├── manifest.json     # 断点续跑记录，不包含账号密码或 Cookie
-└── assets/
-    └── 1320673525/
-        ├── frame-a1b2c3d4-0001.png
-        ├── question-001.jpg
-        └── courseware.pdf
+downloads/<课程编号>-<期次>/
+├── notes.md       # 按章节、课时与时间线排列的图文纪要
+├── quizzes.md     # 按教学小节查找题目的索引
+├── manifest.json  # 断点续跑记录
+└── assets/         # 截图、题目配图与课件
 ```
 
-每个章节标题都有原课时链接。未提供字幕、课件下载或播放器截图失败时，文档中会写明缺失项。对于课件，工具只尝试下载当前课程提供的 PDF 地址；无法下载时尝试保存页面可见的课件截图或文字。图文与测验只保存在本地，项目仓库不包含课程内容。
+课程列表、目录、视频链接、字幕、驻点题和可下载课件优先通过当前会话的课程接口获取。通常用 `ffmpeg` 从授权视频流取帧，检测画面变化并等待画面稳定后保存；接口或媒体处理缺项时才按需打开浏览器补采。终端会显示采集阶段、已用时间，以及可计算进度时的进度条。重复运行会跳过已完成资源，并保留先前取得的字幕、截图和题目。
 
-## 已知限制
+授权视频链接会过期，播放器打不开时重新获取即可。`play` 直接把链接作为一个参数传给播放器；可使用 `--player PATH` 或 `MOOC_NOTES_PLAYER`。播放器需要支持平台返回的 HLS 或 MP4。
 
-- 登录后才可读取参与课程的目录。仅输入课程编号或纯数字 ID 时，工具从当前账号的课程列表解析期次；若课程不在列表中，请使用含 `tid` 的完整链接。
-- 账号课程菜单使用个人空间提供的课程列表；若接口因网络故障不可用，交互菜单仍允许手动输入课程代码或链接。
-- 字幕依赖平台提供的字幕轨或字幕文件；不做语音识别。
-- 画面变化检测基于视频截图采样，无法保证捕获小于采样间隔的变化。视频流或播放器不可访问、视频黑屏或加密渲染时，会继续导出字幕、小测等内容并标记该视频待重试。
-- 测验会读取平台已向当前登录会话提供的题干、选项、配图、答案和解析。某些驻点题只有“继续播放”占位文字，没有实际答案；工具会标记缺失。课后 Quiz 优先读取课程接口中的题目与答案；接口未提供时回退页面，且不会自动点击“开始答题”或提交答案。
-- 有时间锚点的驻点小测可直接读取。缺少时间锚点时，`quizzes` 或 `--scan-mode realtime` 会实际播放；若小测阻塞播放，后续小测可能仍需手动操作后再运行。
-- 不保证平台改版后选择器和课程目录接口继续可用。建议提交脱敏后的问题报告及课程 URL，帮助适配不同课程。
+## 限制与隐私
 
-## 隐私与使用范围
+- 字幕依赖课程提供的字幕轨，不做语音识别。按间隔采样可能遗漏短暂画面变化；动画较多时可减小 `--interval`。视频流、课件或 Quiz 未向当前会话开放时，会在纪要中标明缺失。
+- 工具只保存课程已向当前会话提供的题目、答案和解析，不会开始或提交测验。部分答案或无锚点的驻点题可能无法获取；实时播放遇到必须手动操作的小测时，后续扫描可能中断。
+- API 会话保存在用户状态目录的 `mooc-notes-cli/session-*.json`，浏览器资料位于其 `browser/` 子目录；可用 `XDG_STATE_HOME` 和 `--profile` 调整。会话文件仅保留课程请求需要的 Cookie，仍代表登录状态。不要分享会话文件、授权视频链接、抓包记录或 `downloads/`。
+- 本项目忽略本地下载、浏览器资料和日志。提交问题时请先删除 Cookie、用户编号、签名、个人信息和课程媒体文件。测试样例请使用虚构数据。
 
-浏览器会话默认保存在用户目录 `~/.local/state/mooc-notes-cli/browser`，API 使用的 Cookie 副本保存在同一状态目录下的 `session-*.json`，权限为仅当前用户可读写（遵循 `XDG_STATE_HOME`）。`--profile` 会使用对应的独立 API 会话。它们都包含登录状态，不要将这些文件、Cookie、HAR 或 `downloads/` 提交到 GitHub。工具不接收账号密码、不向第三方服务上传数据、不自动答题，也不处理视频 DRM。
-
-如果要帮助适配尚需网页加载的课后 Quiz，可提供**已完成的 Quiz 结果页**中相关 XHR/DWR 请求的脱敏记录。请先删除 Cookie、CSRF、用户编号、签名、授权视频链接和个人信息；保留请求路径、参数名与匿名化后的响应字段结构即可。无需开启或提交一次新的测验。
-
-请只整理自己有权访问、可供个人学习的课程内容，并遵守课程方的使用规则。平台的[教师帮助](https://help.icourse163.org/help-doc/oc-manual4.html)说明视频可含驻点测验与字幕；[官方接口文档](https://docs.icourse163.org/api-doc/get-info.html)说明文档能否下载由课程方设置。
+仅整理自己有权访问且可供个人学习的内容，并遵守课程方规则。
 
 ## 开发
 
@@ -121,6 +95,4 @@ npm run check
 npm test
 ```
 
-项目使用原生 ES 模块和 Node 内置测试器。课程目录、采集、字幕、题目、文档生成分模块维护。见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-许可证：[MIT](LICENSE)。
+源码按接口请求、采集、字幕/画面处理与文档生成分模块维护。贡献说明见 [CONTRIBUTING.md](CONTRIBUTING.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。许可证：[MIT](LICENSE)。

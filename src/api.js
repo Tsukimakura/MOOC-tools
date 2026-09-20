@@ -11,6 +11,10 @@ import { memberIdFromCookies } from './auth.js';
 
 const ORIGIN = 'https://www.icourse163.org';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const SESSION_COOKIES = new Set([
+  'NTESSTUDYSI', 'STUDY_INFO', 'STUDY_SESS', 'STUDY_PERSIST',
+  'NETEASE_WDA_UID', 'JSESSIONID', 'NTES_YD_SESS', 'NTES_YD_PASSPORT', 'EDUWEBDEVICE'
+]);
 
 export function sessionPath(profile = defaultProfile()) {
   const stateRoot = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local/state');
@@ -19,8 +23,8 @@ export function sessionPath(profile = defaultProfile()) {
 }
 
 function validCookie(cookie) {
-  return cookie && typeof cookie.name === 'string' && typeof cookie.value === 'string' &&
-    typeof cookie.domain === 'string' && /(^|\.)icourse163\.org$/.test(cookie.domain.replace(/^\./, ''));
+  return cookie && SESSION_COOKIES.has(cookie.name) && typeof cookie.value === 'string' &&
+    ['.icourse163.org', 'icourse163.org', 'www.icourse163.org'].includes(cookie.domain);
 }
 
 export async function saveSession(cookies, profile) {
@@ -36,6 +40,7 @@ export async function saveSession(cookies, profile) {
     await rm(temporary, { force: true }).catch(() => {});
     throw error;
   }
+  return selected;
 }
 
 export async function readSession(profile) {
@@ -44,6 +49,9 @@ export async function readSession(profile) {
     if (data.version !== 1 || !Array.isArray(data.cookies)) throw new Error('会话文件格式无效。');
     const cookies = data.cookies.filter(validCookie).filter((cookie) => !cookie.expires || cookie.expires < 0 || cookie.expires > Date.now() / 1000);
     if (!cookies.some((cookie) => cookie.name === 'NTESSTUDYSI')) return null;
+    if (cookies.length !== data.cookies.length || ((await stat(sessionPath(profile))).mode & 0o777) !== 0o600) {
+      await saveSession(cookies, profile);
+    }
     return cookies;
   } catch (error) {
     if (error.code === 'ENOENT') return null;
@@ -58,8 +66,7 @@ export async function syncBrowserSession(options = {}) {
   const { browser, page } = await launchSession({ ...options, headless: true });
   try {
     const cookies = await page.browserContext().cookies(ORIGIN);
-    await saveSession(cookies, options.profile);
-    return cookies;
+    return await saveSession(cookies, options.profile);
   } finally { await browser.close(); }
 }
 
@@ -77,7 +84,7 @@ function cookieHeader(cookies, url) {
 
 export class MoocApi {
   constructor(cookies, fetchImpl = fetch) {
-    this.cookies = cookies;
+    this.cookies = cookies.filter(validCookie);
     this.fetch = fetchImpl;
     this.memberId = null;
   }

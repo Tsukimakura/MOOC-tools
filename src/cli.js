@@ -12,28 +12,28 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
-  mooc-notes                 交互式菜单：选课程、课时与操作
-  mooc-notes login [--browser 路径] [--profile 目录]
-  mooc-notes courses         列出当前账号中的课程
-  mooc-notes list [课程链接|课程编号|数字ID]
-  mooc-notes export [课程] [--lesson 小节ID | --unit 资源ID | --all] [--output 目录]
-  mooc-notes quizzes [课程] [--lesson 小节ID | --unit 资源ID | --all] [--output 目录]
-  mooc-notes video-url [课程] [--unit 视频名称或ID]
-  mooc-notes play [课程] [--unit 视频名称或ID] [--player PATH]
+  mooc-notes                         交互式菜单：选操作、课程和教学小节
+  mooc-notes login                   首次登录并保存本机会话
+  mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
 
-省略课程时在终端中选择账号课程，或手动输入课程代码；导出时按教学小节选择。
-video-url 只向标准输出写入视频链接，便于复制或传给播放器。
+模式：notes（默认，图文纪要）、quizzes（小测）、list（目录）、
+      courses（账号课程）、url（视频链接）、play（播放器）。
+无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
+
+课程示例：ZJU1-1460402161、1460402161、
+  https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496
 
 选项：
+  --mode MODE          notes、quizzes、list、courses、url 或 play
   --browser PATH       Chrome/Chromium 可执行文件
   --profile DIR        浏览器本机会话目录；API 会话按此目录隔离
   --headless           需要网页采集时无界面运行
   --api-only           不启动浏览器；网页专属内容会标记缺失
-  --player PATH        play 使用的播放器；也可设置 MOOC_NOTES_PLAYER
+  --player PATH        播放器程序；也可设置 MOOC_NOTES_PLAYER
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --lesson TEXT        导出一个教学小节的全部相关资源
   --unit TEXT          只导出匹配名称或 ID 的单项资源
@@ -51,7 +51,7 @@ function parseArguments(argv) {
   const positional = [];
   const names = new Map([
     ['--browser', 'browser'], ['--profile', 'profile'], ['--output', 'output'], ['--player', 'player'],
-    ['--unit', 'unit'], ['--lesson', 'lesson'], ['--interval', 'interval'], ['--threshold', 'threshold'], ['--max-frames', 'maxFrames'], ['--scan-mode', 'scanMode']
+    ['--unit', 'unit'], ['--lesson', 'lesson'], ['--mode', 'mode'], ['--interval', 'interval'], ['--threshold', 'threshold'], ['--max-frames', 'maxFrames'], ['--scan-mode', 'scanMode']
   ]);
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -210,30 +210,40 @@ async function saveApiQuestionImages(api, questions, directory, unitId) {
 export async function main(argv) {
   const { options, positional } = parseArguments(argv);
   if (options.version) { console.log(VERSION); return; }
-  if (options.help || (!positional.length && !process.stdin.isTTY)) { console.log(HELP); return; }
-  const [commandArgument, input] = positional;
-  const command = commandArgument || await choose([
-    { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'export' },
-    { label: '获取教学小节的全部小测', value: 'quizzes' },
-    { label: '获取视频链接', value: 'video-url' },
-    { label: '用自己的播放器播放', value: 'play' },
-    { label: '查看账号课程', value: 'courses' },
-    { label: '登录中国大学 MOOC', value: 'login' }
-  ], '请选择操作');
-  if (!['login', 'courses', 'list', 'export', 'quizzes', 'video-url', 'play'].includes(command)) throw new Error(`未知命令：${command}`);
-  if (options.all && !['export', 'quizzes'].includes(command)) throw new Error('--all 只适用于 export 和 quizzes。');
+  if (options.help || (!positional.length && !options.mode && !process.stdin.isTTY)) { console.log(HELP); return; }
+  if (positional.length > 1) throw new Error('只能提供一个课程编号或链接。');
+  if (['courses', 'list', 'export', 'quizzes', 'video-url', 'play'].includes(positional[0])) {
+    throw new Error('旧命令已合并；请使用 mooc-notes [课程] --mode 模式。运行 --help 查看示例。');
+  }
+  const loginRequested = positional[0] === 'login';
+  let command = loginRequested ? 'login' : options.mode || 'notes';
+  if (!loginRequested && !positional.length && !options.mode && !options.lesson && !options.unit && !options.all) {
+    command = await choose([
+      { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'notes' },
+      { label: '获取教学小节的全部小测', value: 'quizzes' },
+      { label: '获取视频链接', value: 'url' },
+      { label: '用自己的播放器播放', value: 'play' },
+      { label: '查看账号课程', value: 'courses' },
+      { label: '查看课程目录', value: 'list' },
+      { label: '登录中国大学 MOOC', value: 'login' }
+    ], '请选择操作');
+  }
+  const input = loginRequested ? undefined : positional[0];
+  if (!['login', 'courses', 'list', 'notes', 'quizzes', 'url', 'play'].includes(command)) throw new Error(`未知模式：${command}`);
+  if (options.mode && loginRequested) throw new Error('login 不支持 --mode。');
+  if (options.all && !['notes', 'quizzes'].includes(command)) throw new Error('--all 只适用于 notes 和 quizzes。');
   if (options.player && command !== 'play') throw new Error('--player 只适用于 play。');
   if (options.unit && ['login', 'courses'].includes(command)) throw new Error('--unit 不适用于当前命令。');
-  if (options.lesson && !['export', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 export 和 quizzes。');
+  if (options.lesson && !['notes', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 notes 和 quizzes。');
+  if (command === 'courses' && input) throw new Error('查看账号课程无需指定课程。');
   if (!['login', 'courses'].includes(command) && !input) requireTerminal('请提供课程代码或链接；交互选择需要在终端中运行。');
-  if (['export', 'quizzes'].includes(command) && !options.unit && !options.lesson && !options.all) {
+  if (['notes', 'quizzes'].includes(command) && !options.unit && !options.lesson && !options.all) {
     requireTerminal('默认只导出一个教学小节；请用 --lesson 指定小节、--unit 指定单项资源，或用 --all 导出整门课程。');
   }
-  if (positional.length > (['login', 'courses'].includes(command) ? 1 : 2)) throw new Error('命令中有多余的位置参数。');
   if (command === 'login' && options.headless) throw new Error('login 需要打开可见浏览器，请移除 --headless。');
   if (command === 'login' && options.apiOnly) throw new Error('login 需要浏览器，请移除 --api-only。');
+  options.scanMode ||= command === 'quizzes' && !options.apiOnly ? 'realtime' : 'seek';
   if (options.apiOnly && options.scanMode === 'realtime') throw new Error('--api-only 与 --scan-mode realtime 不能同时使用。');
-  options.scanMode ||= command === 'quizzes' ? 'realtime' : 'seek';
   if (command === 'login') {
     const { browser, page, userDataDir } = await launchSession(options);
     try { await login(page, userDataDir); } finally { await browser.close(); }
@@ -269,18 +279,18 @@ export async function main(argv) {
     }
     const selectedCourse = input || await chooseCourse(api);
     const course = await withProgress('读取课程目录', () => api.course(selectedCourse));
-    if (command === 'video-url' || command === 'play') {
+    if (command === 'url' || command === 'play') {
       const unit = await chooseVideo(course, options.unit);
       let player;
       if (command === 'play') {
-        player = options.player || process.env.MOOC_NOTES_PLAYER || process.env.VIDEO_OPENER;
+        player = options.player || process.env.MOOC_NOTES_PLAYER;
         if (!player) {
           requireTerminal('请用 --player PATH 或 MOOC_NOTES_PLAYER 指定播放器。');
           player = await askText('请输入播放器程序路径或命令');
         }
       }
       const stream = await withProgress('获取视频授权地址', () => videoStreamWithRetry(api, unit));
-      if (command === 'video-url') console.log(stream.url);
+      if (command === 'url') console.log(stream.url);
       else {
         await openInPlayer(player, stream.url);
         console.log(`已启动播放器：${unit.name}`);
@@ -339,7 +349,7 @@ export async function main(argv) {
             delete record.contentUrl;
           }
         }
-        if (command === 'export' && unit.type === 'video' && options.scanMode !== 'realtime') {
+        if (command === 'notes' && unit.type === 'video' && options.scanMode !== 'realtime') {
           record = await captureVideoApi(api, unit, path.join(directory, 'assets'), {
             ...options, onStage: (stage) => progress.stage(stage), onProgress: (percent) => progress.percent(percent)
           });
@@ -349,7 +359,7 @@ export async function main(argv) {
             record.ok = false;
           }
         }
-        if (command === 'export' && unit.type === 'document') {
+        if (command === 'notes' && unit.type === 'document') {
           record = await captureDocumentApi(api, unit, path.join(directory, 'assets'), {
             onStage: (stage) => progress.stage(stage)
           });
@@ -358,8 +368,8 @@ export async function main(argv) {
           const direct = record;
           try {
             progress.stage('使用课程网页补采内容');
-            const fromBrowser = await captureUnit(await getPage(progress), unit, path.join(directory, 'assets'), {
-              ...options, quizzesOnly: command === 'quizzes', skipStream: Boolean(direct && unit.type === 'video'),
+            const fromBrowser = await captureUnit(await getPage(progress), api, unit, path.join(directory, 'assets'), {
+              ...options, quizzesOnly: command === 'quizzes',
               onStage: (stage) => progress.stage(stage), onProgress: (percent) => progress.percent(percent)
             });
             record = direct ? mergeCapturedRecord(direct, fromBrowser, unit) : fromBrowser;
