@@ -20,6 +20,7 @@ test('字幕、截图、小测按时间排序，索引可回链到课程纪要',
   assert.ok(notes.indexOf('先说这句话') < notes.indexOf('frame-0001.png'));
   assert.ok(notes.indexOf('frame-0001.png') < notes.indexOf('小测问题？'));
   assert.match(notes, /<a id="unit-3"><\/a>/);
+  assert.match(notes, /答案：当前会话未获取到/);
   assert.match(renderQuizIndex(course, [record]), /notes\.md#unit-3/);
 });
 

@@ -39,3 +39,11 @@ test('新的驻点时间覆盖旧记录中误判的零秒', () => {
   const saved = mergeCapturedRecord(previous, current, { type: 'video' });
   assert.equal(saved.questions[0].time, 73);
 });
+
+test('已有截图不会掩盖仍缺失的驻点小测', () => {
+  const base = { cues: [], screenshots: [{ time: 0, file: 'frame.png' }], attachments: [], text: '', warnings: [] };
+  const previous = { ...base, ok: true, questions: [{ id: '1', title: '题目 A', time: 10 }] };
+  const current = { ...base, ok: false, questions: [], warnings: ['视频共有 2 处驻点小测，仍缺 1 处；该课时会在下次运行时重试。'] };
+  const saved = mergeCapturedRecord(previous, current, { type: 'video', anchors: [{ id: '1', time: 10 }, { id: '2', time: 30 }] });
+  assert.equal(saved.ok, false);
+});

@@ -40,7 +40,7 @@ export function dedupeQuestions(questions) {
   return questions.filter((question) => {
     const title = plain(question.title);
     if (!title || title.length < 3) return false;
-    const key = `${title}|${(question.options || []).map(plain).join('|')}`;
+    const key = question.id ? `id:${question.id}` : `${title}|${(question.options || []).map(plain).join('|')}|${question.time ?? ''}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -48,7 +48,19 @@ export function dedupeQuestions(questions) {
 }
 
 // Network payloads can expose question text and options before the UI lays them out.
-// Answer fields are intentionally ignored: only answers actually shown on screen are exported.
+function answerText(value) {
+  if (value == null || value === '' || typeof value === 'boolean') return '';
+  if (Array.isArray(value)) return value.map(answerText).filter(Boolean).join('；');
+  if (typeof value === 'object') return answerText(value.content ?? value.text ?? value.value);
+  return plain(value);
+}
+
+function usableAnswer(value, options = []) {
+  const text = answerText(value);
+  if (!options.length && /^let['’]?s continue[.!…]*$/i.test(text)) return '';
+  return text;
+}
+
 export function questionsFromData(data, time = null) {
   const found = [];
   const visited = new Set();
@@ -59,12 +71,16 @@ export function questionsFromData(data, time = null) {
     const title = node.plainTextTitle || node.questionTitle || node.title || node.stem;
     if (title && (Array.isArray(options) || node.optionNumber != null || node.testId != null)) {
       const rawOptions = Array.isArray(options) ? options : [];
+      const marked = rawOptions.flatMap((option, index) =>
+        option && typeof option === 'object' && (option.answer === true || option.isCorrect === true || option.correct === true)
+          ? [`${String.fromCharCode(65 + index)}. ${plain(option.content || option.text || option.title)}`] : []);
       const question = {
         id: String(node.id ?? ''),
         title: plain(title),
         options: rawOptions.map((option) => plain(typeof option === 'string' ? option : option.content || option.text || option.title)).filter(Boolean),
         images: [...new Set([...(imageUrls(node.title)), ...rawOptions.flatMap((option) => imageUrls(typeof option === 'string' ? option : option.content || option.text || option.title))])],
-        answer: '', explanation: '',
+        answer: usableAnswer(node.stdAnswer ?? node.correctAnswer ?? node.standardAnswer ?? node.answer, rawOptions) || marked.join('；'),
+        explanation: answerText(node.analyse ?? node.analysis ?? node.explanation),
         time: Number.isFinite(time) ? time : normalizeTime(node)
       };
       if (question.title) found.push(question);
@@ -121,19 +137,33 @@ export async function questionsFromPage(page, time = null) {
 }
 
 export function mergeQuestions(...groups) {
-  const map = new Map();
+  const merged = [];
   for (const question of groups.flat()) {
-    const key = plain(question.title);
-    if (!key) continue;
-    const previous = map.get(key);
-    map.set(key, previous ? {
+    const title = plain(question.title);
+    if (!title) continue;
+    const index = merged.findIndex((previous) => {
+      if (previous.id && question.id) return previous.id === question.id;
+      return plain(previous.title) === title &&
+        (previous.time == null || question.time == null || Math.abs(previous.time - question.time) < 2);
+    });
+    const previous = merged[index];
+    const next = previous ? {
       ...previous,
+      id: previous.id || question.id || '',
       options: previous.options?.length ? previous.options : question.options,
       images: [...new Set([...(previous.images || []), ...(question.images || [])])],
-      answer: previous.answer || question.answer || '',
+      answer: usableAnswer(previous.answer, previous.options) || usableAnswer(question.answer, question.options),
       explanation: previous.explanation || question.explanation || '',
       time: previous.time ?? question.time ?? null
-    } : question);
+    } : { ...question, answer: usableAnswer(question.answer, question.options) };
+    if (index < 0) merged.push(next);
+    else merged[index] = next;
   }
-  return [...map.values()];
+  return merged;
+}
+
+export function missingVideoAnchors(anchors = [], questions = []) {
+  return anchors.filter((anchor) => !questions.some((question) =>
+    question.id === anchor.id || question.time != null && Math.abs(question.time - anchor.time) < 5
+  ));
 }
