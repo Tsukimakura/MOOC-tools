@@ -1,6 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeCapturedRecord } from '../src/cli.js';
+import { chooseResources, mergeCapturedRecord } from '../src/cli.js';
+
+test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可精确选择', async () => {
+  const base = { chapterIndex: 1, chapter: '第二章', lessonIndex: 0, lesson: '2.1 红黑树', lessonId: '101' };
+  const units = [
+    { ...base, id: '1', type: 'video', name: '定义' },
+    { ...base, id: '2', type: 'video', name: '高度' },
+    { ...base, id: '3', type: 'quiz', name: 'Quiz 2.1' },
+    { ...base, id: '4', lessonIndex: 1, lesson: '2.2 操作', lessonId: '102', type: 'video', name: '插入' }
+  ];
+  const course = { units };
+  assert.deepEqual((await chooseResources(course, 'export', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
+  assert.deepEqual((await chooseResources(course, 'export', { unit: '3' })).map((unit) => unit.id), ['3']);
+  assert.deepEqual((await chooseResources(course, 'quizzes', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
+});
 
 test('重试失败时保留已经采集到的字幕，并继续标记视频待重试', () => {
   const previous = {
