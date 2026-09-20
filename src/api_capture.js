@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { resourceUrlsFromDwr, subtitleUrlsFromDwr } from './capture.js';
+import { resourceUrlsFromDwr, subtitleUrlsFromDwr } from './resources.js';
 import { captureStreamFrames } from './stream.js';
 import { dedupeCues, parseSubtitle } from './subtitles.js';
 import { missingVideoAnchors } from './quiz.js';

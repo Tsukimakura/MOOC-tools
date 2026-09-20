@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { MoocApi, readSession, saveSession, sessionPath } from '../src/api.js';
@@ -9,7 +9,7 @@ import { memberIdFromCookies } from '../src/auth.js';
 const cookies = [
   { name: 'NTESSTUDYSI', value: 'csrf-test', domain: '.icourse163.org', path: '/', secure: true },
   { name: 'STUDY_SESS', value: 'secret-test', domain: '.icourse163.org', path: '/', secure: true },
-  { name: 'unrelated', value: 'ignore', domain: '.example.com', path: '/', secure: true }
+  { name: 'THE_LAST_LOGIN_MOBILE', value: 'redacted', domain: 'reg.icourse163.org', path: '/', secure: true }
 ];
 
 test('从学习会话 Cookie 读取用户编号，不依赖个人主页 HTML', () => {
@@ -37,6 +37,25 @@ test('API 会话文件仅保存平台 Cookie，且只有当前用户可读', asy
     assert.equal((await stat(file)).mode & 0o777, 0o600);
     assert.equal(JSON.parse(await readFile(file, 'utf8')).cookies.length, 2);
     assert.equal((await readSession(profile)).length, 2);
+  } finally {
+    if (oldState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = oldState;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('读取旧会话时删除多余 Cookie 并收紧文件权限', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mooc-session-test-'));
+  const oldState = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = root;
+  try {
+    const profile = path.join(root, 'profile');
+    const file = sessionPath(profile);
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, JSON.stringify({ version: 1, cookies }), { mode: 0o644 });
+    assert.equal((await readSession(profile)).length, 2);
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).cookies.length, 2);
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
   } finally {
     if (oldState === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = oldState;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeQuestions, missingVideoAnchors, questionsFromData, questionsFromDwr } from '../src/quiz.js';
-import { fetchVideoQuestions, resourceUrlsFromDwr, subtitleUrlsFromDwr } from '../src/capture.js';
+import { resourceUrlsFromDwr, subtitleUrlsFromDwr } from '../src/resources.js';
 
 test('接口题目保留课程提供的答案、解析和选项', () => {
   const fromNetwork = questionsFromData({ result: { questions: [{
@@ -49,17 +49,6 @@ test('无选项驻点题的继续播放占位文字不作为答案', () => {
 test('按驻点编号或时间检查遗漏的题目', () => {
   const anchors = [{ id: '1', time: 10 }, { id: '2', time: 30 }, { id: '3', time: 50 }];
   assert.deepEqual(missingVideoAnchors(anchors, [{ id: '1', time: null }, { id: '', time: 31 }]), [anchors[2]]);
-});
-
-test('独立读取驻点题时使用课程目录中的视频时间', async () => {
-  const body = 'var s0=[];var s1={};s0[0]=s1;s1.id=123;s1.optionNumber=0;s1.plainTextTitle="旋转后是什么颜色？";';
-  const page = {
-    browserContext: () => ({ cookies: async () => [{ name: 'NTESSTUDYSI', value: 'test' }] }),
-    evaluate: async () => body
-  };
-  const questions = await fetchVideoQuestions(page, { id: '10', anchors: [{ id: '123', time: 73 }] });
-  assert.equal(questions.length, 1);
-  assert.equal(questions[0].time, 73);
 });
 
 test('只从 DWR 元数据提取资源 URL，不执行返回的脚本', () => {

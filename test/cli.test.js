@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseResources, mergeCapturedRecord } from '../src/cli.js';
+import { chooseResources, main, mergeCapturedRecord } from '../src/cli.js';
+
+test('统一命令显示模式与课程样例，并指出旧命令替代方式', async () => {
+  const original = console.log;
+  let help = '';
+  try {
+    console.log = (message) => { help = message; };
+    await main(['--help']);
+  } finally { console.log = original; }
+  assert.match(help, /mooc-notes \[课程\] \[--mode 模式\]/);
+  assert.match(help, /ZJU1-1460402161\?tid=1488053496/);
+  await assert.rejects(main(['export']), /旧命令已合并/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'unknown']), /未知模式/);
+});
 
 test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可精确选择', async () => {
   const base = { chapterIndex: 1, chapter: '第二章', lessonIndex: 0, lesson: '2.1 红黑树', lessonId: '101' };
@@ -11,8 +24,8 @@ test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可
     { ...base, id: '4', lessonIndex: 1, lesson: '2.2 操作', lessonId: '102', type: 'video', name: '插入' }
   ];
   const course = { units };
-  assert.deepEqual((await chooseResources(course, 'export', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
-  assert.deepEqual((await chooseResources(course, 'export', { unit: '3' })).map((unit) => unit.id), ['3']);
+  assert.deepEqual((await chooseResources(course, 'notes', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
+  assert.deepEqual((await chooseResources(course, 'notes', { unit: '3' })).map((unit) => unit.id), ['3']);
   assert.deepEqual((await chooseResources(course, 'quizzes', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "mooc-notes-cli",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Export personal study notes from China University MOOC courses",
   "type": "module",
   "bin": {
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check bin/mooc-notes.js && node --check src/api.js && node --check src/api_capture.js && node --check src/auth.js && node --check src/browser.js && node --check src/capture.js && node --check src/cli.js && node --check src/course.js && node --check src/frames.js && node --check src/media.js && node --check src/player.js && node --check src/progress.js && node --check src/prompt.js && node --check src/quiz.js && node --check src/render.js && node --check src/stream.js && node --check src/subtitles.js"
+    "check": "node --check bin/mooc-notes.js && node --check src/api.js && node --check src/api_capture.js && node --check src/auth.js && node --check src/browser.js && node --check src/capture.js && node --check src/cli.js && node --check src/course.js && node --check src/frames.js && node --check src/media.js && node --check src/player.js && node --check src/progress.js && node --check src/prompt.js && node --check src/quiz.js && node --check src/render.js && node --check src/resources.js && node --check src/stream.js && node --check src/subtitles.js"
   },
   "dependencies": {
     "puppeteer-core": "^25.11.0"
