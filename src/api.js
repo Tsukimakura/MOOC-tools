@@ -7,6 +7,7 @@ import { defaultProfile, launchSession } from './browser.js';
 import { normalizeAccountCourses, normalizeCourse, parseCourseInput } from './course.js';
 import { resourceSignature, normalizeVideoUrl } from './stream.js';
 import { questionsFromDwr } from './quiz.js';
+import { memberIdFromCookies } from './auth.js';
 
 const ORIGIN = 'https://www.icourse163.org';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -158,9 +159,12 @@ export class MoocApi {
 
   async getMemberId() {
     if (this.memberId) return this.memberId;
-    const html = await this.request('/home.htm', { text: true });
+    const cookieId = memberIdFromCookies(this.cookies);
+    if (cookieId) { this.memberId = cookieId; return cookieId; }
+    let html = '';
+    try { html = await this.request('/home.htm', { text: true }); } catch { /* Some sessions redirect HTML pages while RPC remains usable. */ }
     const id = html.match(/userId=(\d+)/)?.[1] || html.match(/id\s*:\s*"(\d+)",\s*nickName\s*:/)?.[1];
-    if (!id) throw new Error('个人主页没有返回用户编号；请重新登录。');
+    if (!id) throw new Error('会话中没有可用的用户编号；请重新运行 mooc-notes login。');
     this.memberId = id;
     return id;
   }
@@ -246,7 +250,7 @@ export class MoocApi {
     return questionsFromDwr(await this.lessonUnitDwr(unit));
   }
 
-  async resource(url, limit = 8_000_000) {
+  async download(url, limit = 8_000_000) {
     let current = new URL(url, ORIGIN);
     for (let redirects = 0; redirects < 4; redirects++) {
       if (current.protocol === 'http:') current.protocol = 'https:';
@@ -264,7 +268,6 @@ export class MoocApi {
       }
       if (!response.ok || Number(response.headers.get('content-length') || 0) > limit) return null;
       const type = response.headers.get('content-type') || '';
-      if (!/^image\/(?:jpeg|png|webp)/i.test(type)) return null;
       const chunks = [];
       let total = 0;
       for await (const chunk of response.body) {
@@ -275,5 +278,10 @@ export class MoocApi {
       return { bytes: Buffer.concat(chunks), type };
     }
     return null;
+  }
+
+  async resource(url, limit = 8_000_000) {
+    const resource = await this.download(url, limit);
+    return /^image\/(?:jpeg|png|webp)/i.test(resource?.type || '') ? resource : null;
   }
 }

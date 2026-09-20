@@ -4,13 +4,15 @@ import { createInterface } from 'node:readline/promises';
 import { launchSession } from './browser.js';
 import { MoocApi, readSession, saveSession, syncBrowserSession } from './api.js';
 import { captureUnit } from './capture.js';
+import { captureDocumentApi, captureVideoApi } from './api_capture.js';
 import { groupLessons, safeName, selectLessons, selectUnits } from './course.js';
 import { openInPlayer } from './player.js';
 import { askText, choose } from './prompt.js';
+import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.3.1';
+const VERSION = '0.4.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -30,6 +32,7 @@ video-url 只向标准输出写入视频链接，便于复制或传给播放器�
   --browser PATH       Chrome/Chromium 可执行文件
   --profile DIR        浏览器本机会话目录；API 会话按此目录隔离
   --headless           需要网页采集时无界面运行
+  --api-only           不启动浏览器；网页专属内容会标记缺失
   --player PATH        play 使用的播放器；也可设置 MOOC_NOTES_PLAYER
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --lesson TEXT        导出一个教学小节的全部相关资源
@@ -55,6 +58,7 @@ function parseArguments(argv) {
     if (arg === '--help' || arg === '-h') options.help = true;
     else if (arg === '--version') options.version = true;
     else if (arg === '--headless') options.headless = true;
+    else if (arg === '--api-only') options.apiOnly = true;
     else if (arg === '--force') options.force = true;
     else if (arg === '--all') options.all = true;
     else if (names.has(arg)) {
@@ -99,6 +103,7 @@ export function mergeCapturedRecord(previous, record, unit) {
     questions: mergeQuestions(record.questions || [], previous.questions || []),
     attachments: record.attachments.length ? record.attachments : previous.attachments || [],
     text: record.text || previous.text || '',
+    warnings: record.ok ? record.warnings : [...new Set([...(previous.warnings || []), ...(record.warnings || [])])],
     ok: record.ok || Boolean(previous.ok && (unit.type !== 'video' || previous.screenshots?.length))
   } : record;
   if (unit.type === 'video' && missingVideoAnchors(unit.anchors, saved.questions).length) saved.ok = false;
@@ -118,9 +123,8 @@ function requireTerminal(message) {
 
 async function chooseCourse(api) {
   requireTerminal('未提供课程；请传入课程代码或链接，或在终端中运行交互菜单。');
-  process.stderr.write('正在读取账号中的课程…\n');
   let courses = [];
-  try { courses = await api.accountCourses(); }
+  try { courses = await withProgress('读取账号课程', () => api.accountCourses()); }
   catch (error) { process.stderr.write(`账号课程列表暂不可用：${error.message}\n`); }
   if (!courses.length) return askText('请输入课程代码或链接');
   const selected = await choose(courses.map((course) => ({
@@ -185,11 +189,12 @@ async function videoStreamWithRetry(api, unit) {
 
 async function saveApiQuestionImages(api, questions, directory, unitId) {
   let index = 0;
+  let complete = true;
   for (const question of questions) {
     const files = [];
     for (const url of question.images || []) {
       const image = await api.resource(url).catch(() => null);
-      if (!image) return false;
+      if (!image) { complete = false; continue; }
       const extension = image.type.includes('png') ? 'png' : image.type.includes('webp') ? 'webp' : 'jpg';
       const name = `question-${String(++index).padStart(3, '0')}.${extension}`;
       const assetDir = path.join(directory, 'assets', unitId);
@@ -199,7 +204,7 @@ async function saveApiQuestionImages(api, questions, directory, unitId) {
     }
     question.images = files;
   }
-  return true;
+  return complete;
 }
 
 export async function main(argv) {
@@ -226,6 +231,8 @@ export async function main(argv) {
   }
   if (positional.length > (['login', 'courses'].includes(command) ? 1 : 2)) throw new Error('命令中有多余的位置参数。');
   if (command === 'login' && options.headless) throw new Error('login 需要打开可见浏览器，请移除 --headless。');
+  if (command === 'login' && options.apiOnly) throw new Error('login 需要浏览器，请移除 --api-only。');
+  if (options.apiOnly && options.scanMode === 'realtime') throw new Error('--api-only 与 --scan-mode realtime 不能同时使用。');
   options.scanMode ||= command === 'quizzes' ? 'realtime' : 'seek';
   if (command === 'login') {
     const { browser, page, userDataDir } = await launchSession(options);
@@ -234,22 +241,25 @@ export async function main(argv) {
   }
   let cookies = await readSession(options.profile);
   if (!cookies) {
+    if (options.apiOnly) throw new Error('尚无 API 会话；请先运行 mooc-notes login。');
     process.stderr.write('首次迁移已有浏览器会话…\n');
     cookies = await syncBrowserSession(options);
   }
   const api = new MoocApi(cookies);
   let browser;
   let page;
-  const getPage = async () => {
+  const getPage = async (progress) => {
     if (!page) {
+      progress?.stage('启动浏览器以采集网页内容');
       ({ browser, page } = await launchSession(options));
+      progress?.stage('等待课程网页加载');
       await page.goto('https://www.icourse163.org/', { waitUntil: 'domcontentloaded', timeout: 45_000 });
     }
     return page;
   };
   try {
     if (command === 'courses') {
-      const courses = await api.accountCourses();
+      const courses = await withProgress('读取账号课程', () => api.accountCourses());
       if (!courses.length) { console.log('当前账号没有可列出的中国大学 MOOC 课程。'); return; }
       console.log(`当前账号的课程（${courses.length} 门）`);
       for (const [index, course] of courses.entries()) {
@@ -257,7 +267,8 @@ export async function main(argv) {
       }
       return;
     }
-    const course = await api.course(input || await chooseCourse(api));
+    const selectedCourse = input || await chooseCourse(api);
+    const course = await withProgress('读取课程目录', () => api.course(selectedCourse));
     if (command === 'video-url' || command === 'play') {
       const unit = await chooseVideo(course, options.unit);
       let player;
@@ -268,7 +279,7 @@ export async function main(argv) {
           player = await askText('请输入播放器程序路径或命令');
         }
       }
-      const stream = await videoStreamWithRetry(api, unit);
+      const stream = await withProgress('获取视频授权地址', () => videoStreamWithRetry(api, unit));
       if (command === 'video-url') console.log(stream.url);
       else {
         await openInPlayer(player, stream.url);
@@ -296,44 +307,81 @@ export async function main(argv) {
         continue;
       }
       console.log(`[${index + 1}/${resources.length}] 采集 ${unit.type}：${unit.name}`);
+      const progress = new ProgressReporter();
       let record;
-      if (unit.type === 'quiz') {
-        let questions = [];
-        try { questions = await api.quizQuestions(unit); }
-        catch (error) { console.log(`  Quiz 接口不可用，尝试网页采集：${error.message}`); }
-        if (questions.length && await saveApiQuestionImages(api, questions, directory, unit.id)) {
-          const unanswered = questions.filter((question) => !question.answer).length;
-          record = {
-            ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
-            warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
-          };
-          delete record.contentUrl;
+      try {
+        if (unit.type === 'quiz') {
+          progress.stage('读取 Quiz 题目与答案');
+          let questions = [];
+          try { questions = await api.quizQuestions(unit); }
+          catch (error) { progress.stage(`Quiz 接口不可用：${error.message}`); }
+          if (questions.length && await saveApiQuestionImages(api, questions, directory, unit.id)) {
+            const unanswered = questions.filter((question) => !question.answer).length;
+            record = {
+              ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
+              warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
+            };
+            delete record.contentUrl;
+          }
         }
-      }
-      if (command === 'quizzes' && unit.type === 'video' && unit.anchors?.length) {
-        let questions = [];
-        try { questions = await api.videoQuestions(unit); }
-        catch (error) { console.log(`  题目接口不可用，尝试网页采集：${error.message}`); }
-        if (missingVideoAnchors(unit.anchors, questions).length === 0 &&
-          await saveApiQuestionImages(api, questions, directory, unit.id)) {
-          const unanswered = questions.filter((question) => !question.answer).length;
-          record = {
-            ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
-            warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
-          };
-          delete record.contentUrl;
+        if (command === 'quizzes' && unit.type === 'video' && unit.anchors?.length) {
+          progress.stage('读取视频驻点小测');
+          let questions = [];
+          try { questions = await api.videoQuestions(unit); }
+          catch (error) { progress.stage(`题目接口不可用：${error.message}`); }
+          if (missingVideoAnchors(unit.anchors, questions).length === 0 &&
+            await saveApiQuestionImages(api, questions, directory, unit.id)) {
+            const unanswered = questions.filter((question) => !question.answer).length;
+            record = {
+              ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
+              warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
+            };
+            delete record.contentUrl;
+          }
         }
-      }
-      record ||= await captureUnit(await getPage(), unit, path.join(directory, 'assets'), {
-        ...options,
-        quizzesOnly: command === 'quizzes',
-        onProgress: (percent) => console.log(`  视频流处理 ${percent}%`)
-      });
-      const saved = mergeCapturedRecord(previous, record, unit);
-      manifest.records[unit.id] = saved;
-      await saveExport(directory, manifest, course);
-      console.log(`  字幕 ${saved.cues.length} 条，截图 ${saved.screenshots.length} 张，题目 ${saved.questions.length} 道`);
-      for (const warning of saved.warnings) console.log(`  提示：${warning}`);
+        if (command === 'export' && unit.type === 'video' && options.scanMode !== 'realtime') {
+          record = await captureVideoApi(api, unit, path.join(directory, 'assets'), {
+            ...options, onStage: (stage) => progress.stage(stage), onProgress: (percent) => progress.percent(percent)
+          });
+          progress.stage('保存视频小测配图');
+          if (!await saveApiQuestionImages(api, record.questions, directory, unit.id)) {
+            record.warnings.push('部分视频小测配图下载失败。');
+            record.ok = false;
+          }
+        }
+        if (command === 'export' && unit.type === 'document') {
+          record = await captureDocumentApi(api, unit, path.join(directory, 'assets'), {
+            onStage: (stage) => progress.stage(stage)
+          });
+        }
+        if (!record?.ok && !options.apiOnly) {
+          const direct = record;
+          try {
+            progress.stage('使用课程网页补采内容');
+            const fromBrowser = await captureUnit(await getPage(progress), unit, path.join(directory, 'assets'), {
+              ...options, quizzesOnly: command === 'quizzes', skipStream: Boolean(direct && unit.type === 'video'),
+              onStage: (stage) => progress.stage(stage), onProgress: (percent) => progress.percent(percent)
+            });
+            record = direct ? mergeCapturedRecord(direct, fromBrowser, unit) : fromBrowser;
+          } catch (error) {
+            if (!direct) throw error;
+            direct.warnings.push(`网页补采失败：${error.message}`);
+            record = direct;
+          }
+        }
+        if (!record) record = {
+          ...unit, cues: [], screenshots: [], questions: [], attachments: [], text: '', ok: false,
+          warnings: ['API 未提供可导出的内容；--api-only 已跳过网页采集。']
+        };
+        delete record.contentUrl;
+        progress.stage('保存学习纪要');
+        const saved = mergeCapturedRecord(previous, record, unit);
+        manifest.records[unit.id] = saved;
+        await saveExport(directory, manifest, course);
+        progress.stop();
+        console.log(`  字幕 ${saved.cues.length} 条，截图 ${saved.screenshots.length} 张，题目 ${saved.questions.length} 道`);
+        for (const warning of saved.warnings) console.log(`  提示：${warning}`);
+      } finally { progress.stop(); }
     }
     await saveExport(directory, manifest, course);
     console.log(`完成：${path.join(directory, 'notes.md')}；${path.join(directory, 'quizzes.md')}`);

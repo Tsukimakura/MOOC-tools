@@ -4,12 +4,27 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { MoocApi, readSession, saveSession, sessionPath } from '../src/api.js';
+import { memberIdFromCookies } from '../src/auth.js';
 
 const cookies = [
   { name: 'NTESSTUDYSI', value: 'csrf-test', domain: '.icourse163.org', path: '/', secure: true },
   { name: 'STUDY_SESS', value: 'secret-test', domain: '.icourse163.org', path: '/', secure: true },
   { name: 'unrelated', value: 'ignore', domain: '.example.com', path: '/', secure: true }
 ];
+
+test('从学习会话 Cookie 读取用户编号，不依赖个人主页 HTML', () => {
+  assert.equal(memberIdFromCookies([{ name: 'STUDY_INFO', value: encodeURIComponent('name|0|123456789|extra') }]), '123456789');
+  assert.equal(memberIdFromCookies([{ name: 'NETEASE_WDA_UID', value: '#123456789|extra' }]), '123456789');
+  assert.equal(memberIdFromCookies([{ name: 'STUDY_INFO', value: 'invalid' }]), null);
+});
+
+test('有学习会话 Cookie 时获取用户编号不会访问重定向的个人主页', async () => {
+  const api = new MoocApi([...cookies, {
+    name: 'STUDY_INFO', value: encodeURIComponent('name|0|123456789|extra'),
+    domain: '.icourse163.org', path: '/'
+  }], async () => { throw new Error('不应请求个人主页'); });
+  assert.equal(await api.getMemberId(), '123456789');
+});
 
 test('API 会话文件仅保存平台 Cookie，且只有当前用户可读', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'mooc-api-test-'));

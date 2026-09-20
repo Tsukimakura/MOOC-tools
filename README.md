@@ -2,13 +2,13 @@
 
 将中国大学 MOOC 中自己有权访问的课程，整理成可搜索的图文学习纪要。工具按视频时间线合并字幕、画面变化截图和驻点小测，也采集可见的课后或章节 Quiz 与可下载课件。输出为一个 `notes.md`、一个 `quizzes.md` 和本地附件目录。
 
-> 当前版本为 `0.3.1`。课程页面和接口会变化；首次使用请先用一个教学小节验证输出。工具不会自动开始或提交测验。视频截图按间隔采样，两个采样点之间的短暂变化可能遗漏。
+> 当前版本为 `0.4.0`。课程页面和接口会变化；首次使用请先用一个教学小节验证输出。工具不会自动开始或提交测验。视频截图按间隔采样，两个采样点之间的短暂变化可能遗漏。
 
 ## 环境与安装
 
 - Node.js 20 或更新版本
-- Chrome 或 Chromium 浏览器：首次登录、旧会话迁移、视频画面与网页课件采集时使用
-- 建议安装 `ffmpeg`：视频流截图的首选方式；未安装时仍会尝试网页播放器
+- Chrome 或 Chromium 浏览器：首次登录、旧会话迁移，以及 API 无法获取内容时的网页补采
+- `ffmpeg`：常规视频截图使用它直接处理视频流；未安装时才尝试网页播放器
 - 已参加的中国大学 MOOC 课程
 
 ```bash
@@ -43,6 +43,9 @@ mooc-notes export 'ZJU1-1460402161' --lesson 1278585469 --output ./downloads/my-
 # 仅采集一个指定资源，例如一段视频
 mooc-notes export 'ZJU1-1460402161' --unit '1320673525' --output ./downloads/my-course
 
+# 只使用 API 与 ffmpeg，不启动浏览器；接口缺失会写入纪要提示
+mooc-notes export 'ZJU1-1460402161' --unit '1320673525' --api-only
+
 # 明确需要整门课程时才批量采集
 mooc-notes export 'ZJU1-1460402161' --all --output ./downloads/my-course
 
@@ -50,7 +53,7 @@ mooc-notes export 'ZJU1-1460402161' --all --output ./downloads/my-course
 mooc-notes quizzes 'ZJU1-1460402161' --unit 1320673525 --output ./downloads/my-course
 ```
 
-登录后，`courses`、`list`、`video-url`、`play` 直接请求课程接口，不会启动浏览器。课程目录含时间锚点的视频小测和课后 Quiz 也优先直接读取题目、答案和配图；接口缺项时才启动浏览器。`export` 采集视频画面与网页课件时仍会启动浏览器。以前版本的浏览器会话会在首次运行时自动迁移一次；之后这些 API 操作只读取本地会话文件。如果会话失效，重新运行 `mooc-notes login`。
+登录后，`courses`、`list`、`video-url`、`play` 直接请求课程接口，不会启动浏览器。常规 `export` 现在也直接读取字幕和视频流，由 `ffmpeg` 截图并筛选稳定画面；可直接下载的 PDF 课件和 Quiz 同样优先走 API。只有接口缺项、媒体处理失败、课件仅在网页显示，或选择 `--scan-mode realtime` 时才打开浏览器。若要完全禁止浏览器补采，可加 `--api-only`；网页专属内容会标记缺失。以前版本的浏览器会话会在首次运行时自动迁移一次；之后 API 操作只读取本地会话文件。如果会话失效，重新运行 `mooc-notes login`。
 
 `list`、`export`、`quizzes`、`video-url` 和 `play` 都可省略课程参数，在终端中从账号课程列表选择，也可手动输入课程代码或链接。菜单用 ↑/↓ 滚动选择，直接输入关键词筛选，Enter 确认，Esc 清除筛选或退出；PageUp/PageDown 快速翻动。`export` 和 `quizzes` 的交互菜单按教学小节选择，该节内的视频、课件与 Quiz 一起处理；`--lesson` 可在脚本中指定小节，`--unit` 只选单项资源，`--all` 才批量处理整门课程。
 
@@ -72,7 +75,7 @@ MOOC_NOTES_PLAYER=mpv mooc-notes play 'ZJU1-1460402161' --unit 1320673525
 
 `video-url` 仅将 URL 写到标准输出，方便复制或在脚本中传递。`play` 将 URL 作为一个参数交给指定播放器，不经过 shell。播放器需支持平台提供的 HLS 或 MP4 链接；URL 含有会过期的授权参数，失效后重新运行命令即可。`--player` 接受可执行文件路径或系统可找到的命令，亦兼容 `VIDEO_OPENER` 环境变量。菜单的交互方式参考 [PTA-tools](https://github.com/Tsukimakura/PTA-tools)；播放流程参考 [ZJU-live-better 的 getVideoURL.js](https://github.com/5dbwat4/ZJU-live-better/blob/main/classroom.zju/getVideoURL.js)，本项目访问的仍是中国大学 MOOC 课程。
 
-`export` 默认以 2 秒间隔从课程提供的视频流取帧，检测画面变化后等待连续稳定的采样点，再保存截图；需要 `ffmpeg`。当视频流不可用或未安装 `ffmpeg` 时，工具尝试网页播放器。视频流需要读取整节视频，跨境网络较慢时会显示处理进度。`quizzes` 优先直接读取课程公布的驻点时间、题目和答案，并核对驻点数量；缺少题目时才播放视频。课程没有提供答案时会在文档中明确提示。发现视频中有驻点小测却未被采集时，使用 `--scan-mode realtime --force` 实际播放该课时。实时模式将播放器静音并以 2 倍速播放；遇到需要学员操作的小测会保存当前可见题目并停止该视频的后续扫描。可用 `--interval 1` 提高截图密度，`--threshold 0.5` 增加小幅画面变化的截图，`--max-frames` 调整每个视频的截图上限。
+`export` 默认以 2 秒间隔从课程提供的视频流取帧，检测画面变化后等待连续稳定的采样点，再保存截图；需要 `ffmpeg`。视频流需要读取整节视频。终端会显示当前阶段、已用时间，以及有可计算进度时的进度条；若视频 CDN 连续 60 秒没有新画面，会停止该流并尝试网页补采。跨境网络较慢时，先观察“等待视频 CDN”提示，再考虑重试。`quizzes` 优先直接读取课程公布的驻点时间、题目和答案，并核对驻点数量；缺少题目时才播放视频。课程没有提供答案时会在文档中明确提示。发现视频中有驻点小测却未被采集时，使用 `--scan-mode realtime --force` 实际播放该课时。实时模式将播放器静音并以 2 倍速播放；遇到需要学员操作的小测会保存当前可见题目并停止该视频的后续扫描。可用 `--interval 1` 提高截图密度，`--threshold 0.5` 增加小幅画面变化的截图，`--max-frames` 调整每个视频的截图上限。
 
 重复执行会跳过 `manifest.json` 中已完成的资源；没有截图的视频会继续重试。`--force` 重新采集，并保留先前成功取得的字幕、截图和题目。建议先运行 `list` 找到资源 ID，再用 `--unit` 试导出。无图形界面的服务器可在已经登录后使用 `--headless` 运行网页采集；首次登录仍需可见浏览器。
 

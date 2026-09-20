@@ -61,3 +61,11 @@ test('已有截图不会掩盖仍缺失的驻点小测', () => {
   const saved = mergeCapturedRecord(previous, current, { type: 'video', anchors: [{ id: '1', time: 10 }, { id: '2', time: 30 }] });
   assert.equal(saved.ok, false);
 });
+
+test('API 与网页均失败时保留两条不同原因', () => {
+  const base = { cues: [], screenshots: [], questions: [], attachments: [], text: '', ok: false };
+  const direct = { ...base, warnings: ['视频流采集失败：CDN 无进度'] };
+  const browser = { ...base, warnings: ['视频播放器未加载，无法截图。'] };
+  const merged = mergeCapturedRecord(direct, browser, { type: 'video', anchors: [] });
+  assert.deepEqual(merged.warnings, ['视频流采集失败：CDN 无进度', '视频播放器未加载，无法截图。']);
+});

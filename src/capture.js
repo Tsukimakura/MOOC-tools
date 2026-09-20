@@ -215,12 +215,14 @@ export async function captureUnit(page, unit, assetRoot, options = {}) {
   const assetDir = path.join(assetRoot, unit.id);
   await mkdir(assetDir, { recursive: true });
   try {
+    options.onStage?.('读取课时元数据');
     let dwr = '';
     if (unit.type !== 'quiz' && !options.quizzesOnly) dwr = await fetchUnitDwr(page, unit);
     if (unit.type === 'video') record.questions = await fetchVideoQuestions(page, unit);
     if (unit.type === 'video' && options.quizzesOnly && unit.anchors?.length && record.questions.length >= unit.anchors.length) {
       record.captureComplete = true;
     } else {
+      options.onStage?.('加载课程网页');
       await openUnit(page, unit);
       if (unit.type === 'video') record.captureComplete = await captureVideo(page, record, assetDir, options, dwr);
       else if (unit.type === 'document') await captureDocument(page, record, assetDir, dwr);
@@ -259,8 +261,9 @@ async function captureVideo(page, record, assetDir, options, dwr) {
     } catch { /* Subtitle URLs may expire. */ }
   }
   let streamIssue = '';
-  if (options.scanMode !== 'realtime' && !options.quizzesOnly) {
+  if (options.scanMode !== 'realtime' && !options.quizzesOnly && !options.skipStream) {
     try {
+      options.onStage?.('获取视频流与字幕');
       let stream;
       for (let attempt = 0; attempt < 3; attempt++) {
         try { stream = await fetchVideoStream(page, record); break; }
@@ -276,13 +279,14 @@ async function captureVideo(page, record, assetDir, options, dwr) {
         }
       }
       record.cues = dedupeCues(record.cues);
-      await captureStreamFrames(page, stream, assetDir, record, { ...options, framePrefix });
+      await captureStreamFrames(stream, assetDir, record, { ...options, framePrefix });
       if (record.screenshots.length) return true;
       streamIssue = '视频流没有产生可见画面。';
     } catch (error) {
       streamIssue = error.code === 'ENOENT' ? '未找到 ffmpeg；安装后可在播放器失败时从视频流提取截图。' : error.message;
     }
   }
+  options.onStage?.('等待网页播放器加载');
   let video = await findVideo(page, 20_000);
   if (!video) {
     await page.evaluate((id) => {
