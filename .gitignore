@@ -1,6 +1,7 @@
 node_modules/
 downloads/
 .mooc-notes/
+mooc-notes-cli/
 *.log
 .DS_Store
 .env
