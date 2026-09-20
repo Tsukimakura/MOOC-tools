@@ -227,6 +227,25 @@ export class MoocApi {
     return questions;
   }
 
+  async lessonUnitDwr(unit) {
+    if (!/^\d+$/.test(unit.id) || !/^\d+$/.test(unit.contentId)) return '';
+    const session = this.cookies.find((cookie) => cookie.name === 'JSESSIONID')?.value || '${scriptSessionId}';
+    const body = [
+      'callCount=1', `scriptSessionId=${session}190`, 'c0-scriptName=CourseBean',
+      'c0-methodName=getLessonUnitLearnVo', 'c0-id=0',
+      `c0-param0=number:${unit.contentId}`, `c0-param1=number:${unit.contentType}`,
+      'c0-param2=number:0', `c0-param3=number:${unit.id}`, `batchId=${Date.now()}`
+    ].join('\n');
+    return this.request(`/dwr/call/plaincall/CourseBean.getLessonUnitLearnVo.dwr?csrfKey=${encodeURIComponent(this.csrf())}`, {
+      method: 'POST', body, text: true
+    });
+  }
+
+  async quizQuestions(unit) {
+    if (unit.type !== 'quiz') return [];
+    return questionsFromDwr(await this.lessonUnitDwr(unit));
+  }
+
   async resource(url, limit = 8_000_000) {
     let current = new URL(url, ORIGIN);
     for (let redirects = 0; redirects < 4; redirects++) {

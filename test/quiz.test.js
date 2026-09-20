@@ -30,6 +30,16 @@ test('同名但不同编号的驻点题保持分开，并可从选项标记推�
   assert.equal(questions[0].answer, 'B. 乙');
 });
 
+test('网页题干带题号时可与接口题目合并并补上答案', () => {
+  const [question] = mergeQuestions(
+    [{ id: '123', title: '红黑树性质是什么？', options: ['红', '黑'], answer: '黑', time: null }],
+    [{ id: '', title: '1 红黑树性质是什么？', options: ['A.', 'B.'], answer: '', time: null }]
+  );
+  assert.equal(question.id, '123');
+  assert.equal(question.answer, '黑');
+  assert.equal(mergeQuestions([question]).length, 1);
+});
+
 test('无选项驻点题的继续播放占位文字不作为答案', () => {
   const [question] = questionsFromData({ id: 7, plainTextTitle: '为什么要旋转？', optionNumber: 0, stdAnswer: "Let's continue..." });
   assert.equal(question.answer, '');

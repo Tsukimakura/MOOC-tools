@@ -138,12 +138,13 @@ export async function questionsFromPage(page, time = null) {
 
 export function mergeQuestions(...groups) {
   const merged = [];
+  const comparableTitle = (title) => plain(title).replace(/^\d+[.、)]?\s+/, '');
   for (const question of groups.flat()) {
     const title = plain(question.title);
     if (!title) continue;
     const index = merged.findIndex((previous) => {
       if (previous.id && question.id) return previous.id === question.id;
-      return plain(previous.title) === title &&
+      return comparableTitle(previous.title) === comparableTitle(title) &&
         (previous.time == null || question.time == null || Math.abs(previous.time - question.time) < 2);
     });
     const previous = merged[index];

@@ -4,13 +4,13 @@ import { createInterface } from 'node:readline/promises';
 import { launchSession } from './browser.js';
 import { MoocApi, readSession, saveSession, syncBrowserSession } from './api.js';
 import { captureUnit } from './capture.js';
-import { safeName, selectUnits } from './course.js';
+import { groupLessons, safeName, selectLessons, selectUnits } from './course.js';
 import { openInPlayer } from './player.js';
 import { askText, choose } from './prompt.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -18,12 +18,12 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   mooc-notes login [--browser 路径] [--profile 目录]
   mooc-notes courses         列出当前账号中的课程
   mooc-notes list [课程链接|课程编号|数字ID]
-  mooc-notes export [课程] [--unit 课时ID | --all] [--output 目录]
-  mooc-notes quizzes [课程] [--unit 课时ID | --all] [--output 目录]
+  mooc-notes export [课程] [--lesson 小节ID | --unit 资源ID | --all] [--output 目录]
+  mooc-notes quizzes [课程] [--lesson 小节ID | --unit 资源ID | --all] [--output 目录]
   mooc-notes video-url [课程] [--unit 视频名称或ID]
   mooc-notes play [课程] [--unit 视频名称或ID] [--player PATH]
 
-省略课程时在终端中选择账号课程，或手动输入课程代码；省略视频课时时在终端中选择。
+省略课程时在终端中选择账号课程，或手动输入课程代码；导出时按教学小节选择。
 video-url 只向标准输出写入视频链接，便于复制或传给播放器。
 
 选项：
@@ -32,8 +32,9 @@ video-url 只向标准输出写入视频链接，便于复制或传给播放器�
   --headless           需要网页采集时无界面运行
   --player PATH        play 使用的播放器；也可设置 MOOC_NOTES_PLAYER
   --output DIR         导出目录，默认 downloads/课程编号-期次
-  --unit TEXT          只导出匹配名称或 ID 的课时资源
-  --all                明确选择整门课程；默认只选一节课
+  --lesson TEXT        导出一个教学小节的全部相关资源
+  --unit TEXT          只导出匹配名称或 ID 的单项资源
+  --all                明确选择整门课程；默认只选一个教学小节
   --interval SEC       视频截图采样间隔，默认 2 秒
   --threshold NUMBER   画面变化阈值，默认 1
   --max-frames NUMBER  每个视频截图上限，默认 160
@@ -47,7 +48,7 @@ function parseArguments(argv) {
   const positional = [];
   const names = new Map([
     ['--browser', 'browser'], ['--profile', 'profile'], ['--output', 'output'], ['--player', 'player'],
-    ['--unit', 'unit'], ['--interval', 'interval'], ['--threshold', 'threshold'], ['--max-frames', 'maxFrames'], ['--scan-mode', 'scanMode']
+    ['--unit', 'unit'], ['--lesson', 'lesson'], ['--interval', 'interval'], ['--threshold', 'threshold'], ['--max-frames', 'maxFrames'], ['--scan-mode', 'scanMode']
   ]);
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -72,7 +73,9 @@ function parseArguments(argv) {
     options[key] = value;
   }
   if (options.scanMode && !['seek', 'realtime'].includes(options.scanMode)) throw new Error('--scan-mode 只能是 seek 或 realtime。');
-  if (options.all && options.unit) throw new Error('--all 和 --unit 不能同时使用。');
+  if ([options.all, options.unit, options.lesson].filter(Boolean).length > 1) {
+    throw new Error('--all、--unit 和 --lesson 只能使用其中一个。');
+  }
   return { options, positional };
 }
 
@@ -138,19 +141,34 @@ async function chooseVideo(course, selector) {
   })), '选择视频课时');
 }
 
-async function chooseResources(course, command, options) {
+export async function chooseResources(course, command, options) {
   const allowed = command === 'quizzes' ? new Set(['video', 'quiz']) : new Set(['video', 'quiz', 'document']);
-  const candidates = (options.unit ? selectUnits(course, options.unit) : course.units)
-    .filter((unit) => allowed.has(unit.type));
+  const candidates = course.units.filter((unit) => allowed.has(unit.type));
   if (!candidates.length) throw new Error('筛选结果中没有可采集的课时。');
   if (options.all) return candidates;
-  if (options.unit && candidates.length === 1) return candidates;
-  requireTerminal('请用 --unit 指定一节课，或用 --all 明确导出整门课程。');
-  const unit = await choose(candidates.map((item) => ({
-    label: `${item.name} [${{ video: '视频', quiz: '小测', document: '课件' }[item.type]}, ${item.id}] · ${item.lesson} · ${item.chapter}`.replace(/\s+/g, ' '),
-    value: item
-  })), command === 'quizzes' ? '选择包含小测的课时' : '选择要导出的课时');
-  return [unit];
+  if (options.unit) {
+    const matches = selectUnits(course, options.unit).filter((unit) => allowed.has(unit.type));
+    if (!matches.length) throw new Error('指定资源不适用于当前命令。');
+    if (matches.length === 1) return matches;
+    requireTerminal('资源名称匹配多个结果；请使用精确的资源 ID。');
+    return [await choose(matches.map((unit) => ({
+      label: `${unit.name} [${unit.type}, ${unit.id}] · ${unit.lesson} · ${unit.chapter}`.replace(/\s+/g, ' '), value: unit
+    })), '选择单项资源')];
+  }
+  let lessons = groupLessons(candidates);
+  if (options.lesson) lessons = selectLessons(lessons, options.lesson);
+  if (lessons.length === 1) return lessons[0].units;
+  requireTerminal('请用 --lesson 指定教学小节、--unit 指定单项资源，或用 --all 导出整门课程。');
+  const selected = await choose(lessons.map((lesson) => {
+    const counts = ['video', 'document', 'quiz'].map((type) => {
+      const number = lesson.units.filter((unit) => unit.type === type).length;
+      return number ? `${{ video: '视频', document: '课件', quiz: 'Quiz' }[type]} ${number}` : '';
+    }).filter(Boolean).join('、');
+    return {
+      label: `${lesson.chapter} / ${lesson.lesson} · ${counts}`.replace(/\s+/g, ' '), value: lesson
+    };
+  }), command === 'quizzes' ? '选择教学小节，收集该节的全部小测' : '选择教学小节，导出全部相关资源');
+  return selected.units;
 }
 
 async function videoStreamWithRetry(api, unit) {
@@ -190,8 +208,8 @@ export async function main(argv) {
   if (options.help || (!positional.length && !process.stdin.isTTY)) { console.log(HELP); return; }
   const [commandArgument, input] = positional;
   const command = commandArgument || await choose([
-    { label: '导出一节课的图文纪要', value: 'export' },
-    { label: '获取一节课的小测', value: 'quizzes' },
+    { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'export' },
+    { label: '获取教学小节的全部小测', value: 'quizzes' },
     { label: '获取视频链接', value: 'video-url' },
     { label: '用自己的播放器播放', value: 'play' },
     { label: '查看账号课程', value: 'courses' },
@@ -201,9 +219,10 @@ export async function main(argv) {
   if (options.all && !['export', 'quizzes'].includes(command)) throw new Error('--all 只适用于 export 和 quizzes。');
   if (options.player && command !== 'play') throw new Error('--player 只适用于 play。');
   if (options.unit && ['login', 'courses'].includes(command)) throw new Error('--unit 不适用于当前命令。');
+  if (options.lesson && !['export', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 export 和 quizzes。');
   if (!['login', 'courses'].includes(command) && !input) requireTerminal('请提供课程代码或链接；交互选择需要在终端中运行。');
-  if (['export', 'quizzes'].includes(command) && !options.unit && !options.all) {
-    requireTerminal('默认只导出一节课；请用 --unit 指定课时，或用 --all 明确导出整门课程。');
+  if (['export', 'quizzes'].includes(command) && !options.unit && !options.lesson && !options.all) {
+    requireTerminal('默认只导出一个教学小节；请用 --lesson 指定小节、--unit 指定单项资源，或用 --all 导出整门课程。');
   }
   if (positional.length > (['login', 'courses'].includes(command) ? 1 : 2)) throw new Error('命令中有多余的位置参数。');
   if (command === 'login' && options.headless) throw new Error('login 需要打开可见浏览器，请移除 --headless。');
@@ -271,12 +290,26 @@ export async function main(argv) {
       const hasQuestions = Boolean(previous?.questions?.length);
       const hasUnanswered = Boolean(previous?.questions?.some((question) => !question.answer));
       const complete = previous?.ok === true && (unit.type !== 'video' || Boolean(previous.screenshots?.length) || (command === 'quizzes' && hasQuestions));
-      if (complete && !options.force && (command !== 'quizzes' || hasQuestions && !hasUnanswered)) {
+      const retryAnswers = hasUnanswered && (unit.type === 'quiz' || command === 'quizzes');
+      if (complete && !options.force && !retryAnswers && (command !== 'quizzes' || hasQuestions)) {
         console.log(`[${index + 1}/${resources.length}] 跳过已采集：${unit.name}`);
         continue;
       }
       console.log(`[${index + 1}/${resources.length}] 采集 ${unit.type}：${unit.name}`);
       let record;
+      if (unit.type === 'quiz') {
+        let questions = [];
+        try { questions = await api.quizQuestions(unit); }
+        catch (error) { console.log(`  Quiz 接口不可用，尝试网页采集：${error.message}`); }
+        if (questions.length && await saveApiQuestionImages(api, questions, directory, unit.id)) {
+          const unanswered = questions.filter((question) => !question.answer).length;
+          record = {
+            ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
+            warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
+          };
+          delete record.contentUrl;
+        }
+      }
       if (command === 'quizzes' && unit.type === 'video' && unit.anchors?.length) {
         let questions = [];
         try { questions = await api.videoQuestions(unit); }

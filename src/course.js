@@ -123,6 +123,27 @@ export function selectUnits(course, selector) {
   return matches;
 }
 
+export function groupLessons(units) {
+  const groups = new Map();
+  for (const unit of units) {
+    const key = `${unit.chapterIndex}:${unit.lessonIndex}`;
+    if (!groups.has(key)) groups.set(key, {
+      key, id: unit.lessonId || unit.id, chapter: unit.chapter, lesson: unit.lesson, units: []
+    });
+    groups.get(key).units.push(unit);
+  }
+  return [...groups.values()];
+}
+
+export function selectLessons(groups, selector) {
+  const needle = String(selector).trim().toLocaleLowerCase();
+  const matches = groups.filter((group) =>
+    group.id === needle || `${group.chapter} / ${group.lesson}`.toLocaleLowerCase().includes(needle)
+  );
+  if (!matches.length) throw new Error(`课程中没有找到教学小节：${selector}`);
+  return matches;
+}
+
 export function safeName(value) {
   return String(value).normalize('NFKC').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 80) || 'course';
 }

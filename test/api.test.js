@@ -39,7 +39,8 @@ test('课程、视频和驻点题直接调用接口并带当前会话', async ()
     });
     if (target.pathname.endsWith('getLastLearnedMocTermDto.rpc')) return Response.json({
       result: { mocTermDto: { id: 91, chapters: [{ lessons: [{ id: 10, units: [
-        { id: 11, contentId: 12, contentType: 1, name: '视频', anchorQuestions: [{ anchor: 73, questionId: 123 }] }
+        { id: 11, contentId: 12, contentType: 1, name: '视频', anchorQuestions: [{ anchor: 73, questionId: 123 }] },
+        { id: 13, contentId: 14, contentType: 5, name: '课后 Quiz' }
       ] }] }] } }
     });
     if (target.pathname === '/home.htm') return new Response('<a href="?userId=456">me</a>');
@@ -52,6 +53,9 @@ test('课程、视频和驻点题直接调用接口并带当前会话', async ()
     if (target.pathname.endsWith('MocQuizBean.fetchQuestions.dwr')) return new Response(
       'var s0=[];var s1={};s0[0]=s1;s1.id=123;s1.optionNumber=0;s1.plainTextTitle="测试题目";s1.stdAnswer="答案";'
     );
+    if (target.pathname.endsWith('CourseBean.getLessonUnitLearnVo.dwr')) return new Response(
+      'var s0=[];var s1={};s0[0]=s1;s1.id=321;s1.optionNumber=0;s1.plainTextTitle="课后题目";s1.stdAnswer="课后答案";'
+    );
     throw new Error(`意外请求：${target}`);
   };
   const api = new MoocApi(cookies, fetchImpl);
@@ -59,9 +63,11 @@ test('课程、视频和驻点题直接调用接口并带当前会话', async ()
   const unit = course.units[0];
   const stream = await api.videoStream(unit);
   const questions = await api.videoQuestions(unit);
+  const quizQuestions = await api.quizQuestions(course.units[1]);
   assert.equal(course.termId, '91');
   assert.equal(stream.url, 'https://mooc2vod.stu.126.net/video.m3u8');
   assert.deepEqual(questions.map(({ time, answer }) => ({ time, answer })), [{ time: 73, answer: '答案' }]);
+  assert.deepEqual(quizQuestions.map(({ id, answer }) => ({ id, answer })), [{ id: '321', answer: '课后答案' }]);
   assert.equal(calls.filter(({ target }) => target.hostname === 'www.icourse163.org').every(({ options }) => options.headers.Cookie.includes('STUDY_SESS=secret-test')), true);
   assert.equal(calls.find(({ target }) => target.hostname === 'vod.study.163.com').options.headers.Cookie, undefined);
 });

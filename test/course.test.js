@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeAccountCourses, normalizeCourse, parseCourseInput, selectUnits } from '../src/course.js';
+import { groupLessons, normalizeAccountCourses, normalizeCourse, parseCourseInput, selectLessons, selectUnits } from '../src/course.js';
 
 const input = 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496#/learn/content?type=detail&id=1278585470&cid=1320673525';
 
@@ -39,4 +39,7 @@ test('目录跨章节标准化并生成示例课时链接', () => {
   assert.deepEqual(course.units[0].anchors, [{ time: 73, id: '1388670745' }]);
   assert.equal(selectUnits(course, '1320673528')[0].name, 'Quiz');
   assert.match(course.units[2].url, /#\/learn\/quiz\?id=99$/);
+  const lessons = groupLessons(course.units);
+  assert.equal(lessons.length, 2);
+  assert.deepEqual(selectLessons(lessons, '1278585470')[0].units.map((unit) => unit.id), ['1320673525', '1320673528']);
 });
