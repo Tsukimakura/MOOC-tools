@@ -30,8 +30,8 @@ function renderQuestion(question, index) {
   const lines = [`**题 ${index + 1}：${line(question.title)}**`];
   for (const image of question.images || []) lines.push(`![题 ${index + 1} 配图](${image})`);
   for (const option of question.options || []) lines.push(`- ${line(option)}`);
-  if (question.answer) lines.push(`- 已显示答案：${line(question.answer)}`);
-  if (question.explanation) lines.push(`- 已显示解析：${line(question.explanation)}`);
+  lines.push(question.answer ? `- 课程提供的答案：${line(question.answer)}` : '- 答案：当前会话未获取到');
+  if (question.explanation) lines.push(`- 课程提供的解析：${line(question.explanation)}`);
   return lines.join('\n');
 }
 
@@ -88,12 +88,12 @@ export function renderQuizIndex(course, records) {
       lines.push(`${index + 1}. ${time}${line(question.title)}`);
       for (const image of question.images || []) lines.push(`   ![题 ${index + 1} 配图](${image})`);
       for (const option of question.options || []) lines.push(`   - ${line(option)}`);
-      if (question.answer) lines.push(`   - 已显示答案：${line(question.answer)}`);
-      if (question.explanation) lines.push(`   - 已显示解析：${line(question.explanation)}`);
+      lines.push(question.answer ? `   - 课程提供的答案：${line(question.answer)}` : '   - 答案：当前会话未获取到');
+      if (question.explanation) lines.push(`   - 课程提供的解析：${line(question.explanation)}`);
     }
     lines.push('');
   }
-  if (!count) lines.push('暂未获取到页面可见的小测题目。', '');
+  if (!count) lines.push('暂未获取到小测题目。', '');
   return `${lines.join('\n').trim()}\n`;
 }
 

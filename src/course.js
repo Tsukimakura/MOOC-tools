@@ -19,6 +19,25 @@ export function parseCourseInput(input) {
   return { url: `https://${HOST}/course/${match[1]}${url.search}`, slug: match[1], termId: url.searchParams.get('tid') };
 }
 
+export function normalizeAccountCourses(items) {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : []).flatMap((item) => {
+    const courseId = String(item?.id || '');
+    const termId = String(item?.termPanel?.id || '');
+    const school = String(item?.schoolPanel?.shortName || '');
+    if (!/^\d+$/.test(courseId) || !/^\d+$/.test(termId) || !/^[a-z\d_]+$/i.test(school)) return [];
+    const slug = `${school}-${courseId}`;
+    const key = `${slug}-${termId}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      title: String(item.name || slug), slug, termId,
+      school: String(item.schoolPanel?.name || ''),
+      url: `https://${HOST}/learn/${slug}?tid=${termId}`
+    }];
+  });
+}
+
 export function normalizeCourse(raw, details = {}) {
   if (!raw || !Array.isArray(raw.chapters)) throw new Error('平台没有返回课程章节；请确认已经参加该期课程。');
   const slug = details.slug || `${details.schoolShortName || 'course'}-${details.courseId || raw.courseId || 'unknown'}`;

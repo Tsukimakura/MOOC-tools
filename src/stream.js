@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
-import { imageSignature, sceneDifference } from './media.js';
+import { imageSignature } from './media.js';
+import { selectStableFrames, spreadCandidates } from './frames.js';
 
 const memberIds = new WeakMap();
 
@@ -112,43 +113,25 @@ async function runFfmpeg(stream, directory, interval, onProgress) {
   } finally { clearTimeout(timeout); }
 }
 
-function spreadCandidates(candidates, maximum) {
-  if (candidates.length <= maximum) return candidates;
-  if (maximum === 1) return [candidates[0]];
-  return Array.from({ length: maximum }, (_, index) =>
-    candidates[Math.round(index * (candidates.length - 1) / (maximum - 1))]
-  );
-}
-
 export async function captureStreamFrames(page, stream, assetDir, record, options = {}) {
   const interval = options.interval ?? 2;
   const threshold = options.threshold ?? 1;
   const maxFrames = options.maxFrames ?? 160;
-  const minGap = options.minGap ?? 3;
-  const maxSilentGap = options.maxSilentGap ?? 60;
   const framePrefix = options.framePrefix || `frame-${Date.now().toString(36)}`;
   const directory = await mkdtemp(path.join(assetDir, '.samples-'));
   try {
     await runFfmpeg(stream, directory, interval, options.onProgress);
     const files = (await readdir(directory)).filter((file) => /^sample-\d+\.png$/.test(file)).sort();
     if (!files.length) throw new Error('ffmpeg 没有产生视频画面。');
-    const candidates = [];
-    let previousSignature = null;
-    let lastCapture = -Infinity;
+    const samples = [];
     for (const [index, file] of files.entries()) {
       const time = Number((index * interval).toFixed(2));
       const png = await readFile(path.join(directory, file));
       const signature = await imageSignature(page.mainFrame(), png);
       const average = signature.reduce((sum, value) => sum + value, 0) / signature.length;
-      if (average < 6) continue;
-      const changed = sceneDifference(previousSignature, signature) >= threshold;
-      const timedFallback = record.cues.length > 0 && time - lastCapture >= maxSilentGap;
-      if (time - lastCapture >= minGap && (changed || timedFallback)) {
-        candidates.push({ time, file });
-        previousSignature = signature;
-        lastCapture = time;
-      }
+      samples.push({ time, file, signature: average < 6 ? null : signature });
     }
+    const candidates = selectStableFrames(samples, { ...options, threshold, hasCues: record.cues.length > 0 });
     for (const [index, candidate] of spreadCandidates(candidates, maxFrames).entries()) {
       const file = `${framePrefix}-${String(index + 1).padStart(4, '0')}.png`;
       await copyFile(path.join(directory, candidate.file), path.join(assetDir, file));

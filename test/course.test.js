@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeCourse, parseCourseInput, selectUnits } from '../src/course.js';
+import { normalizeAccountCourses, normalizeCourse, parseCourseInput, selectUnits } from '../src/course.js';
 
 const input = 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496#/learn/content?type=detail&id=1278585470&cid=1320673525';
 
@@ -12,6 +12,18 @@ test('课程链接、编号和数字 ID 解析', () => {
   assert.equal(parseCourseInput('ZJU1-1460402161').slug, 'ZJU1-1460402161');
   assert.equal(parseCourseInput('1460402161').url, 'https://www.icourse163.org/course/detail.htm?cid=1460402161');
   assert.throws(() => parseCourseInput('https://example.com/course/X-1'), /只接受/);
+});
+
+test('账号课程列表保留期次并排除重复或无效课程', () => {
+  const item = {
+    id: 1460402161, name: 'Advanced Data Structures',
+    termPanel: { id: 1488053496 }, schoolPanel: { shortName: 'ZJU1', name: 'Zhejiang University' }
+  };
+  assert.deepEqual(normalizeAccountCourses([item, item, { ...item, termPanel: null }]), [{
+    title: 'Advanced Data Structures', slug: 'ZJU1-1460402161', termId: '1488053496',
+    school: 'Zhejiang University',
+    url: 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496'
+  }]);
 });
 
 test('目录跨章节标准化并生成示例课时链接', () => {
