@@ -93,6 +93,7 @@ test('课程、视频和驻点题直接调用接口并带当前会话', async ()
     throw new Error(`意外请求：${target}`);
   };
   const api = new MoocApi(cookies, fetchImpl);
+  assert.equal(await api.sessionActive(), true);
   const course = await api.course('TEST-42');
   const unit = course.units[0];
   const stream = await api.videoStream(unit);

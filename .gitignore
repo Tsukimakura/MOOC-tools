@@ -6,6 +6,7 @@ mooc-notes-cli/
 .DS_Store
 .env
 .env.*
+config.json
 session-*.json
 browser/
 *.har
