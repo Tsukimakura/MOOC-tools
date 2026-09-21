@@ -26,6 +26,11 @@ async function cookiesFor(page) {
   return page.browserContext().cookies(ORIGIN);
 }
 
+async function clearAuthenticationCookies(page) {
+  const authentication = (await cookiesFor(page)).filter((cookie) => AUTH_COOKIES.has(cookie.name));
+  if (authentication.length) await page.browserContext().deleteCookie(...authentication);
+}
+
 async function verifySession(cookies) {
   try {
     const manualRedirect = (url, options) => fetch(url, { ...options, redirect: 'manual' });
@@ -127,7 +132,7 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
   const open = dependencies.openLoginPage || openLoginPage;
   const awaitSession = dependencies.waitForSession || waitForSession;
   const direct = dependencies.directPasswordLogin || directPasswordLogin;
-  if (!options.force) {
+  if (!options.force && !options.manual) {
     const existing = await read(options.profile);
     if (existing && hasCourseSession(existing)) {
       const valid = await progress('检查已有登录会话', () => verify(existing));
@@ -136,7 +141,7 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
     }
   }
   let directResult = { status: 'unsupported' };
-  if (credentials.username && credentials.password) {
+  if (!options.manual && credentials.username && credentials.password) {
     directResult = await progress('尝试直接登录', () => direct(credentials)).catch(() => ({ status: 'unavailable' }));
     if (directResult.status === 'success' && hasCourseSession(directResult.cookies || [])) {
       const valid = await progress('验证登录状态', () => verify(directResult.cookies));
@@ -147,52 +152,52 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
       }
     }
   }
-  const background = await launch({ ...options, headless: true });
-  try {
-    const stored = await cookiesFor(background.page);
-    let clearStored = Boolean(options.force);
-    if (!options.force && hasCourseSession(stored)) {
-      const valid = await progress('检查浏览器登录会话', () => verify(stored));
-      if (valid !== false) {
-        await save(stored, background.userDataDir);
-        return valid === true ? '已从浏览器资料恢复登录会话。' :
-          '已恢复浏览器会话，但平台暂不可达，无法验证登录状态。';
-      }
-      clearStored = true;
-    }
-    if (clearStored) {
-      const authentication = stored.filter((cookie) => AUTH_COOKIES.has(cookie.name));
-      if (authentication.length) await background.page.browserContext().deleteCookie(
-        ...authentication
-      );
-    }
-    if (credentials.username && credentials.password &&
-      !['challenge', 'invalid'].includes(directResult.status)) {
-      const cookies = await progress('尝试使用本地账号登录', async () => {
-        await open(background.page);
-        const previous = sessionMarker(await cookiesFor(background.page));
-        if (!(await fill(background.page, credentials, true))) return null;
-        return awaitSession(background.page, previous, 20_000);
-      }).catch(() => null);
-      if (cookies) {
-        const valid = await progress('验证登录状态', () => verify(cookies));
+  if (!options.manual) {
+    const background = await launch({ ...options, headless: true });
+    try {
+      const stored = await cookiesFor(background.page);
+      let clearStored = Boolean(options.force);
+      if (!options.force && hasCourseSession(stored)) {
+        const valid = await progress('检查浏览器登录会话', () => verify(stored));
         if (valid !== false) {
-          await save(cookies, background.userDataDir);
-          return valid === true ? '自动登录成功，会话已保存。' :
-            '已保存新会话，但平台暂不可达，无法验证课程权限。';
+          await save(stored, background.userDataDir);
+          return valid === true ? '已从浏览器资料恢复登录会话。' :
+            '已恢复浏览器会话，但平台暂不可达，无法验证登录状态。';
+        }
+        clearStored = true;
+      }
+      if (clearStored) await clearAuthenticationCookies(background.page);
+      if (credentials.username && credentials.password &&
+        !['challenge', 'invalid'].includes(directResult.status)) {
+        const cookies = await progress('尝试使用本地账号登录', async () => {
+          await open(background.page);
+          const previous = sessionMarker(await cookiesFor(background.page));
+          if (!(await fill(background.page, credentials, true))) return null;
+          return awaitSession(background.page, previous, 20_000);
+        }).catch(() => null);
+        if (cookies) {
+          const valid = await progress('验证登录状态', () => verify(cookies));
+          if (valid !== false) {
+            await save(cookies, background.userDataDir);
+            return valid === true ? '自动登录成功，会话已保存。' :
+              '已保存新会话，但平台暂不可达，无法验证课程权限。';
+          }
         }
       }
-    }
-  } finally { await background.browser.close(); }
+    } finally { await background.browser.close(); }
+  }
 
   const visible = await launch({ ...options, headless: false });
   try {
+    if (options.manual) await clearAuthenticationCookies(visible.page);
     await open(visible.page);
     const previous = sessionMarker(await cookiesFor(visible.page));
-    if (credentials.username && credentials.password) {
+    if (!options.manual && credentials.username && credentials.password) {
       await fill(visible.page, credentials, false).catch(() => false);
     }
-    process.stderr.write('请在登录页完成验证码或手动登录；检测成功后会自动保存会话并关闭浏览器。\n');
+    process.stderr.write(options.manual
+      ? '请在登录页选择需要的登录方式；检测成功后会自动保存会话并关闭浏览器。\n'
+      : '请在登录页完成验证码或手动登录；检测成功后会自动保存会话并关闭浏览器。\n');
     const deadline = Date.now() + 10 * 60_000;
     let marker = previous;
     while (Date.now() < deadline) {

@@ -43,6 +43,35 @@ test('手机号直接登录成功时不启动浏览器', async () => {
   assert.deepEqual(saved, [[session, '/tmp/direct-profile']]);
 });
 
+test('手动登录直接打开可见登录页并忽略账号配置', async () => {
+  const state = { value: [...session, { name: 'PREFERENCE', value: 'keep' }] };
+  const visible = fakeBrowser(state);
+  const launched = [];
+  const deleted = [];
+  visible.page.browserContext = () => ({
+    cookies: async () => state.value,
+    deleteCookie: async (...cookies) => {
+      deleted.push(...cookies.map(({ name }) => name));
+      state.value = state.value.filter(({ name }) => !cookies.some((cookie) => cookie.name === name));
+    }
+  });
+  const result = await login({ manual: true }, { username: 'saved@example.org', password: 'secret' }, {
+    readSession: async () => { throw new Error('不应读取 API 会话'); },
+    directPasswordLogin: async () => { throw new Error('不应直接登录'); },
+    launchSession: async (options) => { launched.push(options.headless); return visible; },
+    openLoginPage: async () => { assert.deepEqual(state.value.map(({ name }) => name), ['PREFERENCE']); },
+    fillPasswordForm: async () => { throw new Error('不应填写密码'); },
+    waitForSession: async () => session,
+    verifySession: async () => true,
+    saveSession: async () => {},
+    withProgress: async (_label, action) => action()
+  });
+  assert.match(result, /会话已保存/);
+  assert.deepEqual(launched, [false]);
+  assert.deepEqual(deleted.sort(), ['NTESSTUDYSI', 'STUDY_SESS']);
+  assert.equal(visible.closed, true);
+});
+
 test('配置的账号先尝试无界面登录，成功后保存并关闭浏览器', async () => {
   const state = { value: [] };
   const background = fakeBrowser(state);
