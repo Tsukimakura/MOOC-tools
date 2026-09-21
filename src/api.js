@@ -76,10 +76,16 @@ function cookieHeader(cookies, url) {
   return cookies.filter((cookie) => {
     const domain = cookie.domain.replace(/^\./, '');
     return (parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`)) &&
-      parsed.pathname.startsWith(cookie.path || '/') &&
+      cookiePathMatches(parsed.pathname, cookie.path) &&
       (!cookie.secure || parsed.protocol === 'https:') &&
       (!cookie.expires || cookie.expires < 0 || cookie.expires > now);
   }).map(({ name, value }) => `${name}=${value}`).join('; ');
+}
+
+function cookiePathMatches(pathname, cookiePath = '/') {
+  return pathname === cookiePath || pathname.startsWith(
+    cookiePath.endsWith('/') ? cookiePath : `${cookiePath}/`
+  );
 }
 
 export class MoocApi {
