@@ -12,7 +12,7 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
