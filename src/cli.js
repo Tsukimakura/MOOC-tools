@@ -21,8 +21,9 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   mooc-notes                         交互式菜单：选操作、课程和一个或多个教学小节
   mooc-notes login                   自动尝试登录；需要验证时打开登录页
   mooc-notes login --manual          直接打开登录页，使用任意手动登录方式
-  mooc-notes config                  设置登录账号和默认播放器
+  mooc-notes config                  设置登录账号、下载目录和默认播放器
   mooc-notes config --player PATH    直接设置默认播放器
+  mooc-notes config --output DIR     直接设置默认下载根目录
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID ... | --unit 资源ID | --all]
 
 模式：notes（默认，图文纪要与小测）、video（获取课程视频，可选择带字幕播放）。
@@ -40,10 +41,10 @@ PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取�
   --api-only           不启动浏览器；网页专属内容会标记缺失
   --player PATH        video 模式直接播放；config 模式保存默认播放器
   --subtitle-arg TEXT  其他播放器的字幕参数模板，例如 --sub-file={file}
-  --output DIR         导出目录，默认 downloads/课程编号-期次
+  --output DIR         本次课程的输出目录，覆盖已配置的下载根目录
   --lesson TEXT        导出指定教学小节；可重复使用以选择多个
   --unit TEXT          只导出匹配名称或 ID 的单项资源
-  --all                明确选择整门课程；默认只选一个教学小节
+  --all                明确选择整门课程；否则选择所需教学小节
   --interval SEC       视频截图采样间隔，默认 2 秒
   --threshold NUMBER   画面变化阈值，默认 1
   --max-frames NUMBER  每个视频截图上限，默认 160
@@ -120,20 +121,33 @@ function requireTerminal(message) {
 }
 
 async function configure(options) {
-  if (options.player) {
-    await updateConfig({ player: options.player });
-    console.log('默认播放器已保存。');
+  if (options.player || options.output) {
+    await updateConfig({
+      ...(options.player ? { player: options.player } : {}),
+      ...(options.output ? { output: path.resolve(options.output) } : {})
+    });
+    if (options.player) console.log('默认播放器已保存。');
+    if (options.output) console.log(`默认下载根目录已保存：${path.resolve(options.output)}`);
     return;
   }
   requireTerminal('设置需要交互终端；可用 mooc-notes config --player PATH 设置默认播放器。');
   const action = await choose([
     { label: '设置默认播放器路径或命令', value: 'player' },
+    { label: '设置默认下载根目录', value: 'output' },
+    { label: '恢复默认下载根目录 downloads/', value: 'clear-output' },
     { label: '设置中国大学 MOOC 账号和密码', value: 'account' },
     { label: '清除已保存的账号和密码', value: 'clear' }
   ], '本地设置');
   if (action === 'player') {
     await updateConfig({ player: await askText('播放器路径或命令') });
     console.log('默认播放器已保存。');
+  } else if (action === 'output') {
+    const output = path.resolve(await askText('下载根目录'));
+    await updateConfig({ output });
+    console.log(`默认下载根目录已保存：${output}`);
+  } else if (action === 'clear-output') {
+    await updateConfig({ output: null });
+    console.log('已恢复默认下载根目录 downloads/。');
   } else if (action === 'account') {
     const username = await askText('登录账号');
     const password = await askSecret('登录密码');
@@ -143,6 +157,12 @@ async function configure(options) {
     await updateConfig({ username: null, password: null });
     console.log('已清除本机保存的账号和密码。');
   }
+}
+
+export function courseOutputDirectory(course, options = {}, config = {}, environment = process.env) {
+  if (options.output) return path.resolve(options.output);
+  const root = environment.MOOC_NOTES_OUTPUT || config.output || 'downloads';
+  return path.resolve(root, safeName(`${course.slug}-${course.termId}`));
 }
 
 async function chooseCourse(api) {
@@ -285,7 +305,7 @@ export async function main(argv) {
       { label: '导出教学小节的图文纪要（可多选，含视频与 Quiz）', value: 'notes' },
       { label: '获取课程视频', value: 'video' },
       { label: '登录中国大学 MOOC', value: 'login' },
-      { label: '设置账号或默认播放器', value: 'config' }
+      { label: '设置账号、下载目录或默认播放器', value: 'config' }
     ], '请选择操作');
   }
   const input = loginRequested || configRequested ? undefined : positional[0];
@@ -294,6 +314,7 @@ export async function main(argv) {
   if (options.mode && (loginRequested || configRequested)) throw new Error(`${command} 不支持 --mode。`);
   if (options.all && command !== 'notes') throw new Error('--all 只适用于 notes 模式。');
   if (options.player && !['video', 'config'].includes(command)) throw new Error('--player 只适用于 video 和 config 模式。');
+  if (options.output && !['notes', 'config'].includes(command)) throw new Error('--output 只适用于 notes 和 config 模式。');
   if (options.manual && command !== 'login') throw new Error('--manual 只适用于 login 模式。');
   if (options.subtitleArg && command !== 'video') throw new Error('--subtitle-arg 只适用于 video 模式。');
   if (options.subtitleArg && !options.subtitleArg.includes('{file}')) throw new Error('--subtitle-arg 必须包含 {file} 占位符。');
@@ -360,7 +381,7 @@ export async function main(argv) {
       return;
     }
     const resources = await chooseResources(course, options);
-    const directory = path.resolve(options.output || path.join('downloads', safeName(`${course.slug}-${course.termId}`)));
+    const directory = courseOutputDirectory(course, options, await readConfig());
     const manifest = await readManifest(directory, course);
     for (const [index, unit] of resources.entries()) {
       const previous = manifest.records[unit.id];

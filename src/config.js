@@ -21,11 +21,11 @@ export async function readConfig() {
   if (data?.version !== 1 || typeof data !== 'object' || Array.isArray(data)) {
     throw new Error('本地配置格式无效；请重新运行 mooc-notes config。');
   }
-  for (const key of ['player', 'username', 'password']) {
+  for (const key of ['player', 'output', 'username', 'password']) {
     if (data[key] !== undefined && typeof data[key] !== 'string') throw new Error(`本地配置中的 ${key} 必须是文本。`);
   }
   if (((await stat(file)).mode & 0o777) !== 0o600) await chmod(file, 0o600);
-  return Object.fromEntries(['player', 'username', 'password']
+  return Object.fromEntries(['player', 'output', 'username', 'password']
     .filter((key) => data[key]).map((key) => [key, data[key]]));
 }
 
@@ -37,7 +37,7 @@ export async function updateConfig(changes) {
     current = {};
   }
   for (const [key, value] of Object.entries(changes)) {
-    if (!['player', 'username', 'password'].includes(key)) throw new Error(`不支持的配置项：${key}`);
+    if (!['player', 'output', 'username', 'password'].includes(key)) throw new Error(`不支持的配置项：${key}`);
     if (value === null) delete current[key];
     else if (typeof value === 'string' && value.trim() && !/[\r\n\0]/.test(value)) {
       current[key] = key === 'password' ? value : value.trim();

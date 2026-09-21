@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseResources, main, mergeCapturedRecord, presentVideoLink } from '../src/cli.js';
+import { chooseResources, courseOutputDirectory, main, mergeCapturedRecord, presentVideoLink } from '../src/cli.js';
 
 test('统一命令显示模式与课程样例，并拒绝无效课程或模式', async () => {
   const original = console.log;
@@ -24,7 +24,15 @@ test('统一命令显示模式与课程样例，并拒绝无效课程或模式',
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'url']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'notes', '--player', 'mpv']), /只适用于 video 和 config 模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--manual']), /只适用于 login 模式/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'video', '--output', 'saved']), /只适用于 notes 和 config 模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'video', '--subtitle-arg', '--subtitle']), /必须包含 \{file\}/);
+});
+
+test('输出目录支持默认根目录、环境变量和本次覆盖', () => {
+  const course = { slug: 'TEST-1', termId: '2' };
+  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, {}), '/saved/root/TEST-1-2');
+  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, { MOOC_NOTES_OUTPUT: '/env/root' }), '/env/root/TEST-1-2');
+  assert.equal(courseOutputDirectory(course, { output: '/one/course' }, { output: '/saved/root' }, {}), '/one/course');
 });
 
 test('获取视频链接后按选择播放，非交互调用不会等待输入', async () => {

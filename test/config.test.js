@@ -11,14 +11,14 @@ test('本地配置保存在用户状态目录，支持更新播放器与清除�
   const previous = process.env.XDG_STATE_HOME;
   process.env.XDG_STATE_HOME = root;
   try {
-    await updateConfig({ player: '/opt/player', username: 'example', password: 'secret with spaces ' });
+    await updateConfig({ player: '/opt/player', output: '/data/courses', username: 'example', password: 'secret with spaces ' });
     assert.deepEqual(await readConfig(), {
-      player: '/opt/player', username: 'example', password: 'secret with spaces '
+      player: '/opt/player', output: '/data/courses', username: 'example', password: 'secret with spaces '
     });
     assert.equal((await stat(configPath())).mode & 0o777, 0o600);
     assert.equal((await stat(path.dirname(configPath()))).mode & 0o777, 0o700);
     await updateConfig({ username: null, password: null });
-    assert.deepEqual(await readConfig(), { player: '/opt/player' });
+    assert.deepEqual(await readConfig(), { player: '/opt/player', output: '/data/courses' });
     assert.doesNotMatch(await readFile(configPath(), 'utf8'), /secret/);
   } finally {
     if (previous === undefined) delete process.env.XDG_STATE_HOME;
@@ -36,6 +36,23 @@ test('可用单条命令保存默认播放器，无需登录或交互终端', as
   try {
     await main(['config', '--player', '/opt/PotPlayer.exe']);
     assert.equal((await readConfig()).player, '/opt/PotPlayer.exe');
+  } finally {
+    console.log = log;
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('可用单条命令保存绝对下载根目录', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mooc-output-setting-'));
+  const previous = process.env.XDG_STATE_HOME;
+  const log = console.log;
+  process.env.XDG_STATE_HOME = root;
+  console.log = () => {};
+  try {
+    await main(['config', '--output', './my-downloads']);
+    assert.equal((await readConfig()).output, path.resolve('./my-downloads'));
   } finally {
     console.log = log;
     if (previous === undefined) delete process.env.XDG_STATE_HOME;
