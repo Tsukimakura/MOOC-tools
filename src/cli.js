@@ -12,7 +12,7 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -21,19 +21,19 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
 
 模式：notes（默认，图文纪要）、quizzes（小测）、list（目录）、
-      courses（账号课程）、url（视频链接）、play（播放器）。
+      courses（账号课程）、video（获取链接后可选择播放）。
 无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
 
 课程示例：ZJU1-1460402161、1460402161、
   https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496
 
 选项：
-  --mode MODE          notes、quizzes、list、courses、url 或 play
+  --mode MODE          notes、quizzes、list、courses 或 video
   --browser PATH       Chrome/Chromium 可执行文件
   --profile DIR        浏览器本机会话目录；API 会话按此目录隔离
   --headless           需要网页采集时无界面运行
   --api-only           不启动浏览器；网页专属内容会标记缺失
-  --player PATH        播放器程序；也可设置 MOOC_NOTES_PLAYER
+  --player PATH        video 模式获取链接后直接播放；也可设置 MOOC_NOTES_PLAYER 供交互选择
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --lesson TEXT        导出一个教学小节的全部相关资源
   --unit TEXT          只导出匹配名称或 ID 的单项资源
@@ -187,6 +187,20 @@ async function videoStreamWithRetry(api, unit) {
   throw lastError;
 }
 
+export async function presentVideoLink(stream, unit, options = {}, ui = {
+  choose, askText, openInPlayer, writeLink: (url) => console.log(url), writeStatus: (message) => process.stderr.write(message)
+}) {
+  ui.writeLink(stream.url);
+  const play = Boolean(options.player) || (options.interactive && await ui.choose([
+    { label: '仅保留视频链接', value: false },
+    { label: '发送到播放器', value: true }
+  ], '视频链接已获取，接下来要做什么？'));
+  if (!play) return;
+  const player = options.player || options.defaultPlayer || await ui.askText('请输入播放器程序路径或命令');
+  await ui.openInPlayer(player, stream.url);
+  ui.writeStatus(`已启动播放器：${unit.name}\n`);
+}
+
 async function saveApiQuestionImages(api, questions, directory, unitId) {
   let index = 0;
   let complete = true;
@@ -221,18 +235,18 @@ export async function main(argv) {
     command = await choose([
       { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'notes' },
       { label: '获取教学小节的全部小测', value: 'quizzes' },
-      { label: '获取视频链接', value: 'url' },
-      { label: '用自己的播放器播放', value: 'play' },
+      { label: '获取视频链接，可继续发送到播放器', value: 'video' },
       { label: '查看账号课程', value: 'courses' },
       { label: '查看课程目录', value: 'list' },
       { label: '登录中国大学 MOOC', value: 'login' }
     ], '请选择操作');
   }
   const input = loginRequested ? undefined : positional[0];
-  if (!['login', 'courses', 'list', 'notes', 'quizzes', 'url', 'play'].includes(command)) throw new Error(`未知模式：${command}`);
+  if (['url', 'play'].includes(command)) throw new Error('视频链接与播放器操作已合并；请使用 --mode video。');
+  if (!['login', 'courses', 'list', 'notes', 'quizzes', 'video'].includes(command)) throw new Error(`未知模式：${command}`);
   if (options.mode && loginRequested) throw new Error('login 不支持 --mode。');
   if (options.all && !['notes', 'quizzes'].includes(command)) throw new Error('--all 只适用于 notes 和 quizzes。');
-  if (options.player && command !== 'play') throw new Error('--player 只适用于 play。');
+  if (options.player && command !== 'video') throw new Error('--player 只适用于 video 模式。');
   if (options.unit && ['login', 'courses'].includes(command)) throw new Error('--unit 不适用于当前命令。');
   if (options.lesson && !['notes', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 notes 和 quizzes。');
   if (command === 'courses' && input) throw new Error('查看账号课程无需指定课程。');
@@ -279,22 +293,14 @@ export async function main(argv) {
     }
     const selectedCourse = input || await chooseCourse(api);
     const course = await withProgress('读取课程目录', () => api.course(selectedCourse));
-    if (command === 'url' || command === 'play') {
+    if (command === 'video') {
       const unit = await chooseVideo(course, options.unit);
-      let player;
-      if (command === 'play') {
-        player = options.player || process.env.MOOC_NOTES_PLAYER;
-        if (!player) {
-          requireTerminal('请用 --player PATH 或 MOOC_NOTES_PLAYER 指定播放器。');
-          player = await askText('请输入播放器程序路径或命令');
-        }
-      }
       const stream = await withProgress('获取视频授权地址', () => videoStreamWithRetry(api, unit));
-      if (command === 'url') console.log(stream.url);
-      else {
-        await openInPlayer(player, stream.url);
-        console.log(`已启动播放器：${unit.name}`);
-      }
+      await presentVideoLink(stream, unit, {
+        player: options.player,
+        defaultPlayer: process.env.MOOC_NOTES_PLAYER,
+        interactive: Boolean(process.stdin.isTTY)
+      });
       return;
     }
     if (command === 'list') {

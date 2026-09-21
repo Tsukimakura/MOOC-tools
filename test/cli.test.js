@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseResources, main, mergeCapturedRecord } from '../src/cli.js';
+import { chooseResources, main, mergeCapturedRecord, presentVideoLink } from '../src/cli.js';
 
 test('统一命令显示模式与课程样例，并指出旧命令替代方式', async () => {
   const original = console.log;
@@ -11,8 +11,43 @@ test('统一命令显示模式与课程样例，并指出旧命令替代方式',
   } finally { console.log = original; }
   assert.match(help, /mooc-notes \[课程\] \[--mode 模式\]/);
   assert.match(help, /ZJU1-1460402161\?tid=1488053496/);
+  assert.match(help, /video（获取链接后可选择播放）/);
   await assert.rejects(main(['export']), /旧命令已合并/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'unknown']), /未知模式/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'url']), /请使用 --mode video/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'notes', '--player', 'mpv']), /只适用于 video 模式/);
+});
+
+test('获取视频链接后按选择播放，非交互调用不会等待输入', async () => {
+  const url = 'https://vod.study.163.com/video.m3u8';
+  const stream = { url };
+  const unit = { name: '示例视频' };
+  const calls = [];
+  const ui = {
+    writeLink: (value) => calls.push(['link', value]),
+    writeStatus: (value) => calls.push(['status', value]),
+    choose: async () => { calls.push(['choose']); return true; },
+    askText: async () => { calls.push(['ask']); return 'mpv'; },
+    openInPlayer: async (player, value) => { calls.push(['open', player, value]); }
+  };
+  await presentVideoLink(stream, unit, { interactive: false }, ui);
+  assert.deepEqual(calls, [['link', url]]);
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, { interactive: true, defaultPlayer: 'mpv' }, ui);
+  assert.deepEqual(calls, [['link', url], ['choose'], ['open', 'mpv', url], ['status', '已启动播放器：示例视频\n']]);
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, { interactive: false, player: 'vlc' }, ui);
+  assert.deepEqual(calls, [['link', url], ['open', 'vlc', url], ['status', '已启动播放器：示例视频\n']]);
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, { interactive: true }, { ...ui, choose: async () => false });
+  assert.deepEqual(calls, [['link', url]]);
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, { interactive: true }, ui);
+  assert.deepEqual(calls, [['link', url], ['choose'], ['ask'], ['open', 'mpv', url], ['status', '已启动播放器：示例视频\n']]);
 });
 
 test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可精确选择', async () => {
