@@ -13,7 +13,7 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.9.1';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -23,8 +23,7 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   mooc-notes config --player PATH    直接设置默认播放器
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
 
-模式：notes（默认，图文纪要）、quizzes（小测）、
-      video（获取链接后可选择带字幕播放）。
+模式：notes（默认，图文纪要与小测）、video（获取链接后可选择带字幕播放）。
 PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取决于课程提供的字幕）。
 无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
 
@@ -32,7 +31,7 @@ PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取�
   https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496
 
 选项：
-  --mode MODE          notes、quizzes 或 video
+  --mode MODE          notes 或 video
   --browser PATH       Chrome/Chromium 可执行文件
   --profile DIR        浏览器本机会话目录；API 会话按此目录隔离
   --headless           需要网页采集时无界面运行
@@ -164,8 +163,8 @@ async function chooseVideo(course, selector) {
   })), '选择视频课时');
 }
 
-export async function chooseResources(course, command, options) {
-  const allowed = command === 'quizzes' ? new Set(['video', 'quiz']) : new Set(['video', 'quiz', 'document']);
+export async function chooseResources(course, options) {
+  const allowed = new Set(['video', 'quiz', 'document']);
   const candidates = course.units.filter((unit) => allowed.has(unit.type));
   if (!candidates.length) throw new Error('筛选结果中没有可采集的课时。');
   if (options.all) return candidates;
@@ -190,7 +189,7 @@ export async function chooseResources(course, command, options) {
     return {
       label: `${lesson.chapter} / ${lesson.lesson} · ${counts}`.replace(/\s+/g, ' '), value: lesson
     };
-  }), command === 'quizzes' ? '选择教学小节，收集该节的全部小测' : '选择教学小节，导出全部相关资源');
+  }), '选择教学小节，导出全部相关资源');
   return selected.units;
 }
 
@@ -272,7 +271,6 @@ export async function main(argv) {
   if (!loginRequested && !positional.length && !options.mode && !options.lesson && !options.unit && !options.all) {
     command = await choose([
       { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'notes' },
-      { label: '获取教学小节的全部小测', value: 'quizzes' },
       { label: '获取视频链接，可继续发送到播放器', value: 'video' },
       { label: '登录中国大学 MOOC', value: 'login' },
       { label: '设置账号或默认播放器', value: 'config' }
@@ -280,21 +278,21 @@ export async function main(argv) {
   }
   const input = loginRequested || configRequested ? undefined : positional[0];
   if (['url', 'play'].includes(command)) throw new Error('视频链接与播放器操作已合并；请使用 --mode video。');
-  if (!['login', 'config', 'notes', 'quizzes', 'video'].includes(command)) throw new Error(`未知模式：${command}`);
+  if (!['login', 'config', 'notes', 'video'].includes(command)) throw new Error(`未知模式：${command}`);
   if (options.mode && (loginRequested || configRequested)) throw new Error(`${command} 不支持 --mode。`);
-  if (options.all && !['notes', 'quizzes'].includes(command)) throw new Error('--all 只适用于 notes 和 quizzes。');
+  if (options.all && command !== 'notes') throw new Error('--all 只适用于 notes 模式。');
   if (options.player && !['video', 'config'].includes(command)) throw new Error('--player 只适用于 video 和 config 模式。');
   if (options.subtitleArg && command !== 'video') throw new Error('--subtitle-arg 只适用于 video 模式。');
   if (options.subtitleArg && !options.subtitleArg.includes('{file}')) throw new Error('--subtitle-arg 必须包含 {file} 占位符。');
   if (options.unit && ['login', 'config'].includes(command)) throw new Error('--unit 不适用于当前命令。');
-  if (options.lesson && !['notes', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 notes 和 quizzes。');
+  if (options.lesson && command !== 'notes') throw new Error('--lesson 只适用于 notes 模式。');
   if (!['login', 'config'].includes(command) && !input) requireTerminal('请提供课程代码或链接；交互选择需要在终端中运行。');
-  if (['notes', 'quizzes'].includes(command) && !options.unit && !options.lesson && !options.all) {
+  if (command === 'notes' && !options.unit && !options.lesson && !options.all) {
     requireTerminal('默认只导出一个教学小节；请用 --lesson 指定小节、--unit 指定单项资源，或用 --all 导出整门课程。');
   }
   if (command === 'login' && options.headless) throw new Error('login 需要在验证时打开可见浏览器，请移除 --headless。');
   if (command === 'login' && options.apiOnly) throw new Error('login 需要浏览器，请移除 --api-only。');
-  options.scanMode ||= command === 'quizzes' && !options.apiOnly ? 'realtime' : 'seek';
+  options.scanMode ||= 'seek';
   if (options.apiOnly && options.scanMode === 'realtime') throw new Error('--api-only 与 --scan-mode realtime 不能同时使用。');
   if (command === 'config') { await configure(options); return; }
   if (command === 'login') {
@@ -346,16 +344,15 @@ export async function main(argv) {
       });
       return;
     }
-    const resources = await chooseResources(course, command, options);
+    const resources = await chooseResources(course, options);
     const directory = path.resolve(options.output || path.join('downloads', safeName(`${course.slug}-${course.termId}`)));
     const manifest = await readManifest(directory, course);
     for (const [index, unit] of resources.entries()) {
       const previous = manifest.records[unit.id];
-      const hasQuestions = Boolean(previous?.questions?.length);
       const hasUnanswered = Boolean(previous?.questions?.some((question) => !question.answer));
-      const complete = previous?.ok === true && (unit.type !== 'video' || Boolean(previous.screenshots?.length) || (command === 'quizzes' && hasQuestions));
-      const retryAnswers = hasUnanswered && (unit.type === 'quiz' || command === 'quizzes');
-      if (complete && !options.force && !retryAnswers && (command !== 'quizzes' || hasQuestions)) {
+      const complete = previous?.ok === true && (unit.type !== 'video' || Boolean(previous.screenshots?.length));
+      const retryAnswers = hasUnanswered && unit.type === 'quiz';
+      if (complete && !options.force && !retryAnswers) {
         console.log(`[${index + 1}/${resources.length}] 跳过已采集：${unit.name}`);
         continue;
       }
@@ -377,22 +374,7 @@ export async function main(argv) {
             delete record.contentUrl;
           }
         }
-        if (command === 'quizzes' && unit.type === 'video' && unit.anchors?.length) {
-          progress.stage('读取视频驻点小测');
-          let questions = [];
-          try { questions = await api.videoQuestions(unit); }
-          catch (error) { progress.stage(`题目接口不可用：${error.message}`); }
-          if (missingVideoAnchors(unit.anchors, questions).length === 0 &&
-            await saveApiQuestionImages(api, questions, directory, unit.id)) {
-            const unanswered = questions.filter((question) => !question.answer).length;
-            record = {
-              ...unit, cues: [], screenshots: [], questions, attachments: [], text: '', ok: true,
-              warnings: unanswered ? [`${unanswered} 道题未从当前课程会话获得答案。`] : []
-            };
-            delete record.contentUrl;
-          }
-        }
-        if (command === 'notes' && unit.type === 'video' && options.scanMode !== 'realtime') {
+        if (unit.type === 'video' && options.scanMode !== 'realtime') {
           record = await captureVideoApi(api, unit, path.join(directory, 'assets'), {
             ...options, onStage: (stage) => progress.stage(stage), onProgress: (percent) => progress.percent(percent)
           });
@@ -402,7 +384,7 @@ export async function main(argv) {
             record.ok = false;
           }
         }
-        if (command === 'notes' && unit.type === 'document') {
+        if (unit.type === 'document') {
           record = await captureDocumentApi(api, unit, path.join(directory, 'assets'), {
             onStage: (stage) => progress.stage(stage)
           });
@@ -412,7 +394,7 @@ export async function main(argv) {
           try {
             progress.stage('使用课程网页补采内容');
             const fromBrowser = await captureUnit(await getPage(progress), api, unit, path.join(directory, 'assets'), {
-              ...options, quizzesOnly: command === 'quizzes',
+              ...options,
               onStage: (stage) => progress.stage(stage), onProgress: (percent) => progress.percent(percent)
             });
             record = direct ? mergeCapturedRecord(direct, fromBrowser, unit) : fromBrowser;

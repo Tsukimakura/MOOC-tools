@@ -33,7 +33,6 @@ mooc-notes         # 交互菜单：选操作、课程、教学小节
 | 模式 | 用途 |
 | --- | --- |
 | `notes`（默认） | 导出字幕、截图、课件和小测 |
-| `quizzes` | 仅收集视频驻点小测和课后 Quiz |
 | `video` | 获取一个视频的授权链接，再选择是否交给播放器 |
 
 课程参数示例：
@@ -48,8 +47,8 @@ mooc-notes         # 交互菜单：选操作、课程、教学小节
 # 导出一段指定视频；也可用 --lesson 1278585470 导出整个教学小节
 mooc-notes 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496' --unit 1320673525
 
-# 只整理该教学小节的全部驻点小测与课后 Quiz
-mooc-notes 1460402161 --mode quizzes --lesson 1278585470
+# 导出整个教学小节，包含视频驻点小测与课后 Quiz；题目也会汇总到 quizzes.md
+mooc-notes 1460402161 --mode notes --lesson 1278585470
 
 # 获取视频链接；在交互终端中可接着选择是否播放
 mooc-notes ZJU1-1460402161 --mode video --unit 1320673525

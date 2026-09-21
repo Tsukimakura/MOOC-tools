@@ -74,17 +74,13 @@ export async function captureUnit(page, api, unit, assetRoot, options = {}) {
   try {
     options.onStage?.('读取课时元数据');
     let dwr = '';
-    if (unit.type !== 'quiz' && !options.quizzesOnly) dwr = await api.lessonUnitDwr(unit).catch(() => '');
+    if (unit.type !== 'quiz') dwr = await api.lessonUnitDwr(unit).catch(() => '');
     if (unit.type === 'video') record.questions = await api.videoQuestions(unit).catch(() => []);
-    if (unit.type === 'video' && options.quizzesOnly && unit.anchors?.length && record.questions.length >= unit.anchors.length) {
-      record.captureComplete = true;
-    } else {
-      options.onStage?.('加载课程网页');
-      await openUnit(page, unit);
-      if (unit.type === 'video') record.captureComplete = await captureVideo(page, api, record, assetDir, options, dwr);
-      else if (unit.type === 'document') await captureDocument(page, api, record, assetDir, dwr);
-      else await captureQuiz(page, record, assetDir);
-    }
+    options.onStage?.('加载课程网页');
+    await openUnit(page, unit);
+    if (unit.type === 'video') record.captureComplete = await captureVideo(page, api, record, assetDir, options, dwr);
+    else if (unit.type === 'document') await captureDocument(page, api, record, assetDir, dwr);
+    else await captureQuiz(page, record, assetDir);
   } catch (error) {
     record.warnings.push(`采集失败：${error.message}`);
   }
@@ -97,11 +93,11 @@ export async function captureUnit(page, api, unit, assetRoot, options = {}) {
   if (missingAnchors.length) record.warnings.push(`视频共有 ${unit.anchors.length} 处驻点小测，仍缺 ${missingAnchors.length} 处；该课时会在下次运行时重试。`);
   const missingAnswers = record.questions.filter((question) => !question.answer).length;
   if (missingAnswers) record.warnings.push(`${missingAnswers} 道题未从当前课程会话获得答案。`);
-  if (unit.type === 'video' && !options.quizzesOnly && !record.cues.length) record.warnings.push('未找到可读取的字幕。');
+  if (unit.type === 'video' && !record.cues.length) record.warnings.push('未找到可读取的字幕。');
   if (unit.type === 'quiz' && !record.questions.length) record.warnings.push('此 Quiz 的题目未在当前学习页面显示；未自动开始答题。');
   record.ok = (unit.type !== 'quiz' || record.questions.length > 0) &&
     !missingAnchors.length &&
-    (record.captureComplete !== false || (options.quizzesOnly && record.questions.length > 0)) &&
+    record.captureComplete !== false &&
     !record.warnings.some((warning) => warning.startsWith('采集失败：'));
   delete record.captureComplete;
   delete record.contentUrl;
@@ -144,14 +140,13 @@ async function captureVideo(page, api, record, assetDir, options, dwr) {
   const interval = options.interval ?? 2;
   const maxFrames = options.maxFrames ?? 160;
   const samples = [];
-  const sampleDir = options.quizzesOnly ? null : await mkdtemp(path.join(assetDir, '.browser-samples-'));
+  const sampleDir = await mkdtemp(path.join(assetDir, '.browser-samples-'));
   const observedQuestions = [];
   const observedCues = [];
   async function sample(actual) {
     observedQuestions.push(...await questionsFromPage(page, actual));
     const subtitle = await overlaySubtitle(video.frame, actual);
     if (subtitle) observedCues.push(subtitle);
-    if (options.quizzesOnly) return;
     const element = await video.frame.$('video');
     if (!element) return;
     const png = await element.screenshot({ type: 'png' });
@@ -213,24 +208,22 @@ async function captureVideo(page, api, record, assetDir, options, dwr) {
         await sample(actual);
       }
     }
-    if (sampleDir) {
-      const candidates = selectStableFrames(samples.sort((a, b) => a.time - b.time), { ...options, hasCues: record.cues.length > 0 });
-      for (const [index, candidate] of spreadCandidates(candidates, maxFrames).entries()) {
-        const file = `${framePrefix}-${String(index + 1).padStart(4, '0')}.png`;
-        await copyFile(path.join(sampleDir, candidate.file), path.join(assetDir, file));
-        record.screenshots.push({ time: candidate.time, file: `assets/${record.id}/${file}` });
-      }
-      if (candidates.length > maxFrames) record.warnings.push(`画面变化超过截图上限 ${maxFrames} 张，已均匀保留；可用 --max-frames 调整。`);
+    const candidates = selectStableFrames(samples.sort((a, b) => a.time - b.time), { ...options, hasCues: record.cues.length > 0 });
+    for (const [index, candidate] of spreadCandidates(candidates, maxFrames).entries()) {
+      const file = `${framePrefix}-${String(index + 1).padStart(4, '0')}.png`;
+      await copyFile(path.join(sampleDir, candidate.file), path.join(assetDir, file));
+      record.screenshots.push({ time: candidate.time, file: `assets/${record.id}/${file}` });
     }
+    if (candidates.length > maxFrames) record.warnings.push(`画面变化超过截图上限 ${maxFrames} 张，已均匀保留；可用 --max-frames 调整。`);
     record.questions = mergeQuestions(record.questions, observedQuestions);
     if (!record.cues.length) record.cues = dedupeCues(observedCues.filter((cue, index, all) =>
       index === 0 || cue.text !== all[index - 1].text
     ));
-    if (!options.quizzesOnly && !record.screenshots.length) record.warnings.push('未能截取非黑屏画面。');
+    if (!record.screenshots.length) record.warnings.push('未能截取非黑屏画面。');
     if (options.scanMode !== 'realtime' && !record.questions.length) record.warnings.push('跳播扫描可能无法触发驻点小测；若此视频有小测，可用 --scan-mode realtime 重新采集。');
-    return Boolean(options.quizzesOnly || record.screenshots.length);
+    return Boolean(record.screenshots.length);
   } finally {
-    if (sampleDir) await rm(sampleDir, { recursive: true, force: true });
+    await rm(sampleDir, { recursive: true, force: true });
   }
 }
 
