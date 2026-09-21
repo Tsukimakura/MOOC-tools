@@ -13,7 +13,7 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.9.1';
+const VERSION = '0.10.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -23,7 +23,7 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   mooc-notes config --player PATH    直接设置默认播放器
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
 
-模式：notes（默认，图文纪要与小测）、video（获取链接后可选择带字幕播放）。
+模式：notes（默认，图文纪要与小测）、video（获取课程视频，可选择带字幕播放）。
 PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取决于课程提供的字幕）。
 无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
 
@@ -214,9 +214,16 @@ export async function presentVideoLink(stream, unit, options = {}, ui = {
     const action = await ui.choose([
       { label: '仅保留视频链接', value: 'link' },
       ...(options.defaultPlayer ? [{ label: `用默认播放器播放：${options.defaultPlayer}`, value: 'default' }] : []),
-      { label: '输入其他播放器路径或命令', value: 'other' }
+      { label: options.defaultPlayer ? '修改默认播放器并播放' : '设置默认播放器并播放', value: 'set-default' },
+      { label: '临时使用其他播放器播放（不保存）', value: 'other' }
     ], '视频链接已获取，接下来要做什么？');
     if (action === 'default') player = options.defaultPlayer;
+    else if (action === 'set-default') {
+      player = await ui.askText('请输入播放器程序路径或命令');
+      await (options.savePlayer || ((value) => updateConfig({ player: value })))(player);
+      ui.writeStatus('默认播放器已保存。\n');
+      if (options.environmentPlayerOverride) ui.writeStatus('提示：MOOC_NOTES_PLAYER 环境变量仍会覆盖本地默认播放器。\n');
+    }
     else if (action === 'other') player = await ui.askText('请输入播放器程序路径或命令');
   }
   if (!player) return;
@@ -271,7 +278,7 @@ export async function main(argv) {
   if (!loginRequested && !positional.length && !options.mode && !options.lesson && !options.unit && !options.all) {
     command = await choose([
       { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'notes' },
-      { label: '获取视频链接，可继续发送到播放器', value: 'video' },
+      { label: '获取课程视频', value: 'video' },
       { label: '登录中国大学 MOOC', value: 'login' },
       { label: '设置账号或默认播放器', value: 'config' }
     ], '请选择操作');
@@ -336,6 +343,7 @@ export async function main(argv) {
       await presentVideoLink(stream, unit, {
         player: options.player,
         defaultPlayer,
+        environmentPlayerOverride: Boolean(process.env.MOOC_NOTES_PLAYER),
         interactive: Boolean(process.stdin.isTTY),
         subtitleArg: options.subtitleArg,
         loadSubtitle: () => withProgress('获取同步字幕', () => preparePlayerSubtitles(

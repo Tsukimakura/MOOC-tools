@@ -11,7 +11,7 @@ test('统一命令显示模式与课程样例，并指出旧命令替代方式',
   } finally { console.log = original; }
   assert.match(help, /mooc-notes \[课程\] \[--mode 模式\]/);
   assert.match(help, /ZJU1-1460402161\?tid=1488053496/);
-  assert.match(help, /video（获取链接后可选择带字幕播放）/);
+  assert.match(help, /video（获取课程视频，可选择带字幕播放）/);
   assert.match(help, /mooc-notes config --player PATH/);
   assert.doesNotMatch(help, /quizzes（小测）|notes、quizzes/);
   assert.doesNotMatch(help, /courses（账号课程）|list（目录）/);
@@ -81,6 +81,45 @@ test('获取视频链接后按选择播放，非交互调用不会等待输入',
   assert.deepEqual(calls, [['link', url], ['status', '可用字幕：英文。\n'],
     ['status', '提示：当前会话仅获取到英文字幕，无法生成中文和双语字幕。\n'],
     ['open', 'mpv', url, { en: '/tmp/en.srt' }, undefined], ['status', '已启动播放器：示例视频\n']]);
+});
+
+test('视频流程可以设置和修改默认播放器，临时播放器不会写入配置', async () => {
+  const calls = [];
+  let menu;
+  let action = 'set-default';
+  const ui = {
+    writeLink: () => {},
+    writeStatus: (message) => calls.push(['status', message]),
+    choose: async (choices) => { menu = choices; return action; },
+    askText: async () => 'mpv',
+    openInPlayer: async (player) => calls.push(['open', player])
+  };
+  const savePlayer = async (player) => calls.push(['save', player]);
+  const stream = { url: 'https://example.invalid/video.m3u8' };
+  const unit = { name: '示例视频' };
+
+  await presentVideoLink(stream, unit, { interactive: true, savePlayer, loadSubtitle: async () => null }, ui);
+  assert.ok(menu.some(({ label, value }) => value === 'set-default' && label === '设置默认播放器并播放'));
+  assert.deepEqual(calls.slice(0, 2), [['save', 'mpv'], ['status', '默认播放器已保存。\n']]);
+  assert.ok(calls.some(([name, value]) => name === 'open' && value === 'mpv'));
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, {
+    interactive: true, defaultPlayer: 'vlc', environmentPlayerOverride: true,
+    savePlayer, loadSubtitle: async () => null
+  }, ui);
+  assert.ok(menu.some(({ label, value }) => value === 'set-default' && label === '修改默认播放器并播放'));
+  assert.deepEqual(calls.slice(0, 3), [
+    ['save', 'mpv'], ['status', '默认播放器已保存。\n'],
+    ['status', '提示：MOOC_NOTES_PLAYER 环境变量仍会覆盖本地默认播放器。\n']
+  ]);
+
+  calls.length = 0;
+  action = 'other';
+  await presentVideoLink(stream, unit, { interactive: true, defaultPlayer: 'vlc', savePlayer, loadSubtitle: async () => null }, ui);
+  assert.ok(menu.some(({ label, value }) => value === 'other' && label.includes('不保存')));
+  assert.ok(calls.some(([name, value]) => name === 'open' && value === 'mpv'));
+  assert.ok(!calls.some(([name]) => name === 'save'));
 });
 
 test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可精确选择', async () => {
