@@ -134,6 +134,7 @@ test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可
   ];
   const course = { units };
   assert.deepEqual((await chooseResources(course, { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
+  assert.deepEqual((await chooseResources(course, { lesson: ['101', '102'] })).map((unit) => unit.id), ['1', '2', '3', '4']);
   assert.deepEqual((await chooseResources(course, { unit: '3' })).map((unit) => unit.id), ['3']);
 });
 

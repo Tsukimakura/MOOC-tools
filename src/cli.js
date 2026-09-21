@@ -9,7 +9,7 @@ import { readConfig, updateConfig } from './config.js';
 import { groupLessons, parseCourseInput, safeName, selectLessons, selectUnits } from './course.js';
 import { login } from './login.js';
 import { openInPlayer, preparePlayerSubtitles, subtitleDirectory } from './player.js';
-import { askSecret, askText, choose } from './prompt.js';
+import { askSecret, askText, choose, chooseMany } from './prompt.js';
 import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
@@ -18,16 +18,16 @@ const { version: VERSION } = createRequire(import.meta.url)('../package.json');
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
-  mooc-notes                         交互式菜单：选操作、课程和教学小节
+  mooc-notes                         交互式菜单：选操作、课程和一个或多个教学小节
   mooc-notes login                   自动尝试登录；需要验证时打开登录页
   mooc-notes login --manual          直接打开登录页，使用任意手动登录方式
   mooc-notes config                  设置登录账号和默认播放器
   mooc-notes config --player PATH    直接设置默认播放器
-  mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
+  mooc-notes [课程] [--mode 模式] [--lesson 小节ID ... | --unit 资源ID | --all]
 
 模式：notes（默认，图文纪要与小测）、video（获取课程视频，可选择带字幕播放）。
 PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取决于课程提供的字幕）。
-无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
+无课程参数时在终端中选账号课程或手动输入；图文纪要支持多选教学小节。
 
 课程示例：ZJU1-1460402161、1460402161、
   https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496
@@ -41,7 +41,7 @@ PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取�
   --player PATH        video 模式直接播放；config 模式保存默认播放器
   --subtitle-arg TEXT  其他播放器的字幕参数模板，例如 --sub-file={file}
   --output DIR         导出目录，默认 downloads/课程编号-期次
-  --lesson TEXT        导出一个教学小节的全部相关资源
+  --lesson TEXT        导出指定教学小节；可重复使用以选择多个
   --unit TEXT          只导出匹配名称或 ID 的单项资源
   --all                明确选择整门课程；默认只选一个教学小节
   --interval SEC       视频截图采样间隔，默认 2 秒
@@ -72,7 +72,9 @@ function parseArguments(argv) {
     else if (names.has(arg)) {
       const value = argv[++index];
       if (!value || (value.startsWith('--') && arg !== '--subtitle-arg')) throw new Error(`${arg} 需要一个值。`);
-      options[names.get(arg)] = value;
+      const name = names.get(arg);
+      if (name === 'lesson') (options.lesson ||= []).push(value);
+      else options[name] = value;
     } else if (arg.startsWith('-')) throw new Error(`未知选项：${arg}`);
     else positional.push(arg);
   }
@@ -182,10 +184,15 @@ export async function chooseResources(course, options) {
     })), '选择单项资源')];
   }
   let lessons = groupLessons(candidates);
-  if (options.lesson) lessons = selectLessons(lessons, options.lesson);
+  if (options.lesson) {
+    const selectors = Array.isArray(options.lesson) ? options.lesson : [options.lesson];
+    const selected = new Set(selectors.flatMap((selector) => selectLessons(lessons, selector)).map(({ key }) => key));
+    lessons = lessons.filter(({ key }) => selected.has(key));
+    return lessons.flatMap(({ units }) => units);
+  }
   if (lessons.length === 1) return lessons[0].units;
   requireTerminal('请用 --lesson 指定教学小节、--unit 指定单项资源，或用 --all 导出整门课程。');
-  const selected = await choose(lessons.map((lesson) => {
+  const selected = await chooseMany(lessons.map((lesson) => {
     const counts = ['video', 'document', 'quiz'].map((type) => {
       const number = lesson.units.filter((unit) => unit.type === type).length;
       return number ? `${{ video: '视频', document: '课件', quiz: 'Quiz' }[type]} ${number}` : '';
@@ -193,8 +200,8 @@ export async function chooseResources(course, options) {
     return {
       label: `${lesson.chapter} / ${lesson.lesson} · ${counts}`.replace(/\s+/g, ' '), value: lesson
     };
-  }), '选择教学小节，导出全部相关资源');
-  return selected.units;
+  }), '选择一个或多个教学小节');
+  return selected.flatMap(({ units }) => units);
 }
 
 async function videoStreamWithRetry(api, unit) {
@@ -275,7 +282,7 @@ export async function main(argv) {
   let command = loginRequested ? 'login' : configRequested ? 'config' : options.mode || 'notes';
   if (!loginRequested && !positional.length && !options.mode && !options.lesson && !options.unit && !options.all) {
     command = await choose([
-      { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'notes' },
+      { label: '导出教学小节的图文纪要（可多选，含视频与 Quiz）', value: 'notes' },
       { label: '获取课程视频', value: 'video' },
       { label: '登录中国大学 MOOC', value: 'login' },
       { label: '设置账号或默认播放器', value: 'config' }
@@ -294,7 +301,7 @@ export async function main(argv) {
   if (options.lesson && command !== 'notes') throw new Error('--lesson 只适用于 notes 模式。');
   if (!['login', 'config'].includes(command) && !input) requireTerminal('请提供课程代码或链接；交互选择需要在终端中运行。');
   if (command === 'notes' && !options.unit && !options.lesson && !options.all) {
-    requireTerminal('默认只导出一个教学小节；请用 --lesson 指定小节、--unit 指定单项资源，或用 --all 导出整门课程。');
+    requireTerminal('请用 --lesson 指定一个或多个小节、--unit 指定单项资源，或用 --all 导出整门课程。');
   }
   if (command === 'login' && options.headless) throw new Error('login 需要在验证时打开可见浏览器，请移除 --headless。');
   if (command === 'login' && options.apiOnly) throw new Error('login 需要浏览器，请移除 --api-only。');
