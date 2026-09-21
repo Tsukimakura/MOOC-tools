@@ -30,7 +30,7 @@ test('登录使用专用登录页，并优先复用现有课程会话', async ()
 test('手机号直接登录成功时不启动浏览器', async () => {
   const saved = [];
   const result = await login({ profile: '/tmp/direct-profile' }, {
-    username: '13800138000', password: 'secret'
+    username: '10000000000', password: 'secret'
   }, {
     readSession: async () => null,
     directPasswordLogin: async () => ({ status: 'success', cookies: session }),
@@ -55,7 +55,7 @@ test('手动登录直接打开可见登录页并忽略账号配置', async () =>
       state.value = state.value.filter(({ name }) => !cookies.some((cookie) => cookie.name === name));
     }
   });
-  const result = await login({ manual: true }, { username: 'saved@example.org', password: 'secret' }, {
+  const result = await login({ manual: true }, { username: 'saved@example.invalid', password: 'secret' }, {
     readSession: async () => { throw new Error('不应读取 API 会话'); },
     directPasswordLogin: async () => { throw new Error('不应直接登录'); },
     launchSession: async (options) => { launched.push(options.headless); return visible; },

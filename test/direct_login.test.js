@@ -62,7 +62,7 @@ test('手机号密码通过 HTTP 登录并收集课程会话', async () => {
     if (url.pathname.endsWith('/ini')) return jsonResponse({ ret: '201', capFlag: 0, pv: false });
     if (url.pathname.endsWith('/gt')) return jsonResponse({ ret: '201', tk: 'ticket' });
     if (url.pathname.endsWith('/pwd/l')) {
-      assert.equal(payload.un, '13800138000');
+      assert.equal(payload.un, '10000000000');
       assert.notEqual(payload.pw, 'test-password');
       assert.equal(payload.tk, 'ticket');
       return jsonResponse({
@@ -75,7 +75,7 @@ test('手机号密码通过 HTTP 登录并收集课程会话', async () => {
     throw new Error(`意外请求：${url}`);
   };
   const result = await directPasswordLogin({
-    username: '13800138000', password: 'test-password'
+    username: '10000000000', password: 'test-password'
   }, { fetchImpl });
   assert.equal(result.status, 'success');
   assert.deepEqual(result.cookies.map(({ name }) => name).sort(), ['NTESSTUDYSI', 'STUDY_SESS']);
@@ -93,7 +93,7 @@ test('平台要求验证码时停止密码请求并交给浏览器', async () =>
     return jsonResponse({ ret: '201', capFlag: 4, pv: true });
   };
   const result = await directPasswordLogin({
-    username: '13800138000', password: 'test-password'
+    username: '10000000000', password: 'test-password'
   }, { fetchImpl });
   assert.equal(result.status, 'challenge');
   assert.equal(paths.some((path) => path.endsWith('/pwd/l')), false);
@@ -113,7 +113,7 @@ test('邮箱账号使用邮箱登录端点', async () => {
     ]);
   };
   const result = await directPasswordLogin({
-    username: 'student@example.org', password: 'test-password'
+    username: 'user@example.invalid', password: 'test-password'
   }, { fetchImpl });
   assert.equal(result.status, 'success');
   assert.equal(paths.some((path) => path === '/dl/zj/mail/l'), true);
