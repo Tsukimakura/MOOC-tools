@@ -6,13 +6,13 @@ import { MoocApi, readSession, saveSession, syncBrowserSession } from './api.js'
 import { captureUnit } from './capture.js';
 import { captureDocumentApi, captureVideoApi } from './api_capture.js';
 import { groupLessons, safeName, selectLessons, selectUnits } from './course.js';
-import { openInPlayer, preparePlayerSubtitle, subtitleDirectory } from './player.js';
+import { openInPlayer, preparePlayerSubtitles, subtitleDirectory } from './player.js';
 import { askText, choose } from './prompt.js';
 import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -22,6 +22,7 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 模式：notes（默认，图文纪要）、quizzes（小测）、list（目录）、
       courses（账号课程）、video（获取链接后可选择带字幕播放）。
+PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取决于课程提供的字幕）。
 无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
 
 课程示例：ZJU1-1460402161、1460402161、
@@ -198,9 +199,17 @@ export async function presentVideoLink(stream, unit, options = {}, ui = {
   ], '视频链接已获取，接下来要做什么？'));
   if (!play) return;
   const player = options.player || options.defaultPlayer || await ui.askText('请输入播放器程序路径或命令');
-  const subtitleFile = await options.loadSubtitle?.();
-  if (!subtitleFile) ui.writeStatus('提示：当前课程会话未提供可读取的字幕，将只播放视频。\n');
-  await ui.openInPlayer(player, stream.url, subtitleFile, options.subtitleArg);
+  const subtitles = await options.loadSubtitle?.();
+  if (!subtitles) ui.writeStatus('提示：当前课程会话未提供可读取的字幕，将只播放视频。\n');
+  else if (typeof subtitles !== 'string') {
+    const languages = [subtitles.zh && '中文', subtitles.en && '英文', subtitles.bilingual && '双语']
+      .filter(Boolean).join(' / ');
+    ui.writeStatus(`可用字幕：${languages || '课程原始字幕'}。\n`);
+    if (subtitles.en && !subtitles.zh) ui.writeStatus('提示：当前会话仅获取到英文字幕，无法生成中文和双语字幕。\n');
+    if (subtitles.sami && /potplayer/i.test(player)) ui.writeStatus('在 PotPlayer 的字幕语言菜单中选择中文、English 或双语。\n');
+    if (subtitles.bilingual && /(?:^|[\\/])mpv(?:\.exe)?$/i.test(player)) ui.writeStatus('在 mpv 中按 j 或 J 切换中文、英文、双语字幕。\n');
+  }
+  await ui.openInPlayer(player, stream.url, subtitles, options.subtitleArg);
   ui.writeStatus(`已启动播放器：${unit.name}\n`);
 }
 
@@ -306,7 +315,7 @@ export async function main(argv) {
         defaultPlayer: process.env.MOOC_NOTES_PLAYER,
         interactive: Boolean(process.stdin.isTTY),
         subtitleArg: options.subtitleArg,
-        loadSubtitle: () => withProgress('获取同步字幕', () => preparePlayerSubtitle(
+        loadSubtitle: () => withProgress('获取同步字幕', () => preparePlayerSubtitles(
           api, unit, stream, subtitleDirectory(options.profile, course, unit)
         ))
       });

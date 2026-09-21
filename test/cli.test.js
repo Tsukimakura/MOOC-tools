@@ -55,6 +55,19 @@ test('获取视频链接后按选择播放，非交互调用不会等待输入',
   await presentVideoLink(stream, unit, { interactive: false, player: 'mpv', loadSubtitle: async () => null }, ui);
   assert.deepEqual(calls, [['link', url], ['status', '提示：当前课程会话未提供可读取的字幕，将只播放视频。\n'],
     ['open', 'mpv', url, null, undefined], ['status', '已启动播放器：示例视频\n']]);
+
+  calls.length = 0;
+  const subtitles = { zh: '/tmp/zh.srt', en: '/tmp/en.srt', bilingual: '/tmp/bilingual.srt', sami: '/tmp/all.smi' };
+  await presentVideoLink(stream, unit, { player: 'PotPlayerMini64.exe', loadSubtitle: async () => subtitles }, ui);
+  assert.deepEqual(calls, [['link', url], ['status', '可用字幕：中文 / 英文 / 双语。\n'],
+    ['status', '在 PotPlayer 的字幕语言菜单中选择中文、English 或双语。\n'],
+    ['open', 'PotPlayerMini64.exe', url, subtitles, undefined], ['status', '已启动播放器：示例视频\n']]);
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, { player: 'mpv', loadSubtitle: async () => ({ en: '/tmp/en.srt' }) }, ui);
+  assert.deepEqual(calls, [['link', url], ['status', '可用字幕：英文。\n'],
+    ['status', '提示：当前会话仅获取到英文字幕，无法生成中文和双语字幕。\n'],
+    ['open', 'mpv', url, { en: '/tmp/en.srt' }, undefined], ['status', '已启动播放器：示例视频\n']]);
 });
 
 test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可精确选择', async () => {

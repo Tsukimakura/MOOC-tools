@@ -86,7 +86,9 @@ downloads/<课程编号>-<期次>/
 
 `video` 模式先将链接写到标准输出。交互终端会继续询问是否发送到播放器；非交互运行只输出链接，适合复制或接入脚本。指定 `--player PATH` 会在获取链接后直接播放；`MOOC_NOTES_PLAYER` 仅用作交互时所选播放器的默认程序。
 
-选择播放后，工具会下载该课时第一条可读取的课程字幕，生成带时间戳的 SRT 文件并交给播放器，使字幕随播放进度显示。这是课程字幕同步播放，不是语音实时转写。内置 [mpv](https://mpv.io/manual/stable/)、[VLC](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/subtitles.html) 和 Windows PotPlayer 的字幕参数；其他播放器可用 `--subtitle-arg '参数={file}'` 提供其单参数模板。若没有可读取的课程字幕，会提示并继续播放视频。字幕文件保存在用户状态目录 `mooc-notes-cli/subtitles/`，仅当前用户可读；播放器退出后仍保留，供再次播放使用。在 WSL 中调用 `.exe` 播放器时，工具通过 `wslpath` 转换字幕路径。播放器需要支持平台返回的 HLS 或 MP4；授权链接过期后重新获取即可。
+选择播放后，工具会读取该课时所有可用的课程字幕轨，并按内容识别中文、英文。两种字幕都有时，还会按起止时间合成双语字幕（上方中文、下方英文）。PotPlayer 使用一个含「中文 / English / 双语」选项的多语言 SMI 文件，在播放器的字幕语言菜单中切换；[mpv](https://mpv.io/manual/stable/) 会加载三条独立字幕轨，按 `j` 或 `J` 切换。[VLC](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/subtitles.html) 和 `--subtitle-arg` 自定义播放器默认加载中文 SRT，可在播放器中手动添加保存的英文或双语 SRT。若当前课程会话只提供英文，工具会明确提示，无法凭空生成中文或双语字幕。这是课程字幕同步播放，不是语音实时转写或机器翻译。
+
+若没有可读取的课程字幕，会提示并继续播放视频。字幕文件保存在用户状态目录 `mooc-notes-cli/subtitles/`，仅当前用户可读；播放器退出后仍保留，供再次播放使用。在 WSL 中调用 `.exe` 播放器时，工具通过 `wslpath` 转换字幕路径。播放器需要支持平台返回的 HLS 或 MP4；授权链接过期后重新获取即可。
 
 ## 限制与隐私
 
