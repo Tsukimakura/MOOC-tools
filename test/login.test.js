@@ -72,49 +72,52 @@ test('手动登录直接打开可见登录页并忽略账号配置', async () =>
   assert.equal(visible.closed, true);
 });
 
-test('配置的账号先尝试无界面登录，成功后保存并关闭浏览器', async () => {
+test('直接登录不可用时打开登录页并预填账号', async () => {
   const state = { value: [] };
-  const background = fakeBrowser(state);
+  const visible = fakeBrowser(state);
   const saved = [];
   const launched = [];
+  let filled = false;
   const result = await login({}, { username: 'example', password: 'secret' }, {
     readSession: async () => null,
-    launchSession: async (options) => { launched.push(options.headless); return background; },
+    directPasswordLogin: async () => ({ status: 'unavailable' }),
+    launchSession: async (options) => { launched.push(options.headless); return visible; },
     openLoginPage: async () => {},
-    fillPasswordForm: async (_page, _credentials, submit) => { if (submit) state.value = session; return true; },
-    verifySession: async () => true,
-    saveSession: async (...args) => saved.push(args),
-    withProgress: async (_label, action) => action()
-  });
-  assert.match(result, /自动登录成功/);
-  assert.deepEqual(launched, [true]);
-  assert.equal(background.closed, true);
-  assert.deepEqual(saved[0][0], session);
-});
-
-test('需要人工验证时打开登录页，检测成功后保存并关闭浏览器', async () => {
-  const background = fakeBrowser({ value: [] });
-  const visible = fakeBrowser({ value: [] });
-  const launched = [];
-  const saved = [];
-  const result = await login({}, { username: 'example', password: 'secret' }, {
-    readSession: async () => null,
-    launchSession: async (options) => { launched.push(options.headless); return options.headless ? background : visible; },
-    openLoginPage: async () => {},
-    fillPasswordForm: async (_page, _credentials, submit) => !submit,
-    waitForSession: async (page) => page === visible.page ? session : null,
+    fillPasswordForm: async () => { filled = true; return true; },
+    waitForSession: async () => session,
     verifySession: async () => true,
     saveSession: async (...args) => saved.push(args),
     withProgress: async (_label, action) => action()
   });
   assert.match(result, /会话已保存/);
-  assert.deepEqual(launched, [true, false]);
-  assert.equal(background.closed, true);
+  assert.deepEqual(launched, [false]);
+  assert.equal(filled, true);
   assert.equal(visible.closed, true);
   assert.deepEqual(saved[0][0], session);
 });
 
-test('强制重新登录只清理课程认证 Cookie', async () => {
+test('需要人工验证时打开登录页，检测成功后保存并关闭浏览器', async () => {
+  const visible = fakeBrowser({ value: [] });
+  const launched = [];
+  const saved = [];
+  const result = await login({}, { username: 'example', password: 'secret' }, {
+    readSession: async () => null,
+    directPasswordLogin: async () => ({ status: 'challenge' }),
+    launchSession: async (options) => { launched.push(options.headless); return visible; },
+    openLoginPage: async () => {},
+    fillPasswordForm: async () => true,
+    waitForSession: async () => session,
+    verifySession: async () => true,
+    saveSession: async (...args) => saved.push(args),
+    withProgress: async (_label, action) => action()
+  });
+  assert.match(result, /会话已保存/);
+  assert.deepEqual(launched, [false]);
+  assert.equal(visible.closed, true);
+  assert.deepEqual(saved[0][0], session);
+});
+
+test('强制重新登录只清理可见浏览器中的课程认证 Cookie', async () => {
   const state = { value: [...session, { name: 'PREFERENCE', value: 'keep' }] };
   const background = fakeBrowser(state);
   const deleted = [];
@@ -140,7 +143,7 @@ test('强制重新登录只清理课程认证 Cookie', async () => {
   assert.equal(background.closed, true);
 });
 
-test('浏览器资料中的会话失效时清理旧认证并重新尝试登录', async () => {
+test('浏览器资料中的会话失效时清理旧认证并打开登录页', async () => {
   const state = { value: session };
   const background = fakeBrowser(state);
   let cleared = false;
@@ -161,13 +164,12 @@ test('浏览器资料中的会话失效时清理旧认证并重新尝试登录',
 });
 
 test('人工登录只有通过课程会话验证后才保存和关闭', async () => {
-  const background = fakeBrowser({ value: [] });
   const visible = fakeBrowser({ value: [] });
   const saved = [];
   let candidates = 0;
   await login({}, {}, {
     readSession: async () => null,
-    launchSession: async (options) => options.headless ? background : visible,
+    launchSession: async () => visible,
     openLoginPage: async () => {},
     waitForSession: async () => [
       { name: 'NTESSTUDYSI', value: `csrf-${++candidates}` },

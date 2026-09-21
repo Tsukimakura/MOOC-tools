@@ -66,7 +66,7 @@ async function revealPasswordForm(page) {
   }
 }
 
-async function fillPasswordForm(page, credentials, submit) {
+async function fillPasswordForm(page, credentials) {
   await revealPasswordForm(page);
   for (let attempt = 0; attempt < 8; attempt++) {
     for (const frame of page.frames()) {
@@ -92,21 +92,6 @@ async function fillPasswordForm(page, credentials, submit) {
         await username.type(credentials.username);
         await password.click({ clickCount: 3 });
         await password.type(credentials.password);
-        if (submit) {
-          const clicked = await password.evaluate((element) => {
-            let container = element.closest('form') || element.parentElement;
-            for (let depth = 0; container && depth < 5; depth++, container = container.parentElement) {
-              const button = [...container.querySelectorAll('button, input[type="submit"], [role="button"], a')]
-                .find((candidate) => candidate.getClientRects().length > 0 &&
-                  /^(?:登录|立即登录|登\s*录|log in|sign in)$/i.test(
-                    (candidate.textContent || candidate.value || '').trim()
-                  ));
-              if (button) { button.click(); return true; }
-            }
-            return false;
-          });
-          if (!clicked) await password.press('Enter');
-        }
         return true;
       } catch { /* Another frame or login method may still be loading. */ }
     }
@@ -152,48 +137,24 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
       }
     }
   }
-  if (!options.manual) {
-    const background = await launch({ ...options, headless: true });
-    try {
-      const stored = await cookiesFor(background.page);
-      let clearStored = Boolean(options.force);
-      if (!options.force && hasCourseSession(stored)) {
-        const valid = await progress('检查浏览器登录会话', () => verify(stored));
-        if (valid !== false) {
-          await save(stored, background.userDataDir);
-          return valid === true ? '已从浏览器资料恢复登录会话。' :
-            '已恢复浏览器会话，但平台暂不可达，无法验证登录状态。';
-        }
-        clearStored = true;
-      }
-      if (clearStored) await clearAuthenticationCookies(background.page);
-      if (credentials.username && credentials.password &&
-        !['challenge', 'invalid'].includes(directResult.status)) {
-        const cookies = await progress('尝试使用本地账号登录', async () => {
-          await open(background.page);
-          const previous = sessionMarker(await cookiesFor(background.page));
-          if (!(await fill(background.page, credentials, true))) return null;
-          return awaitSession(background.page, previous, 20_000);
-        }).catch(() => null);
-        if (cookies) {
-          const valid = await progress('验证登录状态', () => verify(cookies));
-          if (valid !== false) {
-            await save(cookies, background.userDataDir);
-            return valid === true ? '自动登录成功，会话已保存。' :
-              '已保存新会话，但平台暂不可达，无法验证课程权限。';
-          }
-        }
-      }
-    } finally { await background.browser.close(); }
-  }
-
   const visible = await launch({ ...options, headless: false });
   try {
-    if (options.manual) await clearAuthenticationCookies(visible.page);
+    const stored = await cookiesFor(visible.page);
+    let clearStored = Boolean(options.force || options.manual);
+    if (!clearStored && hasCourseSession(stored)) {
+      const valid = await progress('检查浏览器登录会话', () => verify(stored));
+      if (valid !== false) {
+        await save(stored, visible.userDataDir);
+        return valid === true ? '已从浏览器资料恢复登录会话。' :
+          '已恢复浏览器会话，但平台暂不可达，无法验证登录状态。';
+      }
+      clearStored = true;
+    }
+    if (clearStored) await clearAuthenticationCookies(visible.page);
     await open(visible.page);
     const previous = sessionMarker(await cookiesFor(visible.page));
     if (!options.manual && credentials.username && credentials.password) {
-      await fill(visible.page, credentials, false).catch(() => false);
+      await fill(visible.page, credentials).catch(() => false);
     }
     process.stderr.write(options.manual
       ? '请在登录页选择需要的登录方式；检测成功后会自动保存会话并关闭浏览器。\n'
