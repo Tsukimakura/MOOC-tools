@@ -15,7 +15,7 @@ FBye3pjAzfb22+RCuYApSVpJ3OO3KsEuKExftz9oFBv3ejxPlYc5yq7YiBO8XlTn
 QN0Sa4R4qhPO3I2MQIDAQAB
 -----END PUBLIC KEY-----`;
 const ALLOWED_COOKIE_DOMAINS = new Set([
-  'icourse163.org', 'www.icourse163.org', 'reg.icourse163.org'
+  'icourse163.org', 'www.icourse163.org'
 ]);
 const CHALLENGE_CODES = new Set([
   '405', '408', '421', '423', '427', '428', '438', '441', '442', '443',
@@ -49,6 +49,12 @@ function defaultCookiePath(pathname) {
 
 function cookieKey(cookie) {
   return `${cookie.domain}\0${cookie.path}\0${cookie.name}`;
+}
+
+function cookiePathMatches(pathname, cookiePath = '/') {
+  return pathname === cookiePath || pathname.startsWith(
+    cookiePath.endsWith('/') ? cookiePath : `${cookiePath}/`
+  );
 }
 
 export class LoginCookieJar {
@@ -115,7 +121,7 @@ export class LoginCookieJar {
       (!cookie.expires || cookie.expires < 0 || cookie.expires > now) &&
       (cookie.hostOnly ? url.hostname === cookie.domain :
         url.hostname === cookie.domain || url.hostname.endsWith(`.${cookie.domain}`)) &&
-      url.pathname.startsWith(cookie.path) && (!cookie.secure || url.protocol === 'https:'));
+      cookiePathMatches(url.pathname, cookie.path) && (!cookie.secure || url.protocol === 'https:'));
     matches.sort((a, b) => b.path.length - a.path.length);
     return matches.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
   }

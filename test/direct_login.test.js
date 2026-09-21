@@ -36,7 +36,9 @@ test('Cookie 容器遵守域、路径和安全属性', () => {
   assert.match(jar.header('https://www.icourse163.org/learn'), /one=1/);
   assert.doesNotMatch(jar.header('https://www.icourse163.org/learn'), /two=2/);
   assert.match(jar.header('https://reg.icourse163.org/dl/test'), /two=2/);
+  assert.doesNotMatch(jar.header('https://reg.icourse163.org/dlx'), /two=2/);
   assert.doesNotMatch(jar.header('http://www.icourse163.org/'), /one=1/);
+  assert.deepEqual(jar.courseCookies().map(({ name }) => name), ['one']);
 });
 
 test('短时计算题生成可复核的提交参数', async () => {
