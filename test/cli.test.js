@@ -13,11 +13,13 @@ test('统一命令显示模式与课程样例，并指出旧命令替代方式',
   assert.match(help, /ZJU1-1460402161\?tid=1488053496/);
   assert.match(help, /video（获取链接后可选择带字幕播放）/);
   assert.match(help, /mooc-notes config --player PATH/);
+  assert.doesNotMatch(help, /quizzes（小测）|notes、quizzes/);
   assert.doesNotMatch(help, /courses（账号课程）|list（目录）/);
   await assert.rejects(main(['export']), /旧命令已合并/);
   await assert.rejects(main(['courses']), /已并入选课流程/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'unknown']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'list']), /未知模式/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'quizzes']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'url']), /请使用 --mode video/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'notes', '--player', 'mpv']), /只适用于 video 和 config 模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'video', '--subtitle-arg', '--subtitle']), /必须包含 \{file\}/);
@@ -90,9 +92,8 @@ test('图文导出按教学小节包含所有视频和 Quiz，单项资源仍可
     { ...base, id: '4', lessonIndex: 1, lesson: '2.2 操作', lessonId: '102', type: 'video', name: '插入' }
   ];
   const course = { units };
-  assert.deepEqual((await chooseResources(course, 'notes', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
-  assert.deepEqual((await chooseResources(course, 'notes', { unit: '3' })).map((unit) => unit.id), ['3']);
-  assert.deepEqual((await chooseResources(course, 'quizzes', { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
+  assert.deepEqual((await chooseResources(course, { lesson: '101' })).map((unit) => unit.id), ['1', '2', '3']);
+  assert.deepEqual((await chooseResources(course, { unit: '3' })).map((unit) => unit.id), ['3']);
 });
 
 test('重试失败时保留已经采集到的字幕，并继续标记视频待重试', () => {
