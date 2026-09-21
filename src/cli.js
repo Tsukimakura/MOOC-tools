@@ -455,7 +455,8 @@ export async function main(argv) {
       } finally { progress.stop(); }
     }
     await saveExport(directory, manifest, course);
-    console.log(`完成：${path.join(directory, 'notes.md')}；${path.join(directory, 'quizzes.md')}`);
+    console.log(`完成：${path.join(directory, 'README.md')}`);
+    console.log(`课程合并文档：${path.join(directory, 'notes.md')}；${path.join(directory, 'quizzes.md')}`);
   } finally {
     if (browser) await browser.close();
   }
