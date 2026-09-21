@@ -1,5 +1,6 @@
 import { MoocApi, readSession, saveSession } from './api.js';
 import { launchSession } from './browser.js';
+import { directPasswordLogin } from './direct_login.js';
 import { withProgress } from './progress.js';
 
 export const LOGIN_URL = 'https://www.icourse163.org/member/login.htm#/webLoginIndex';
@@ -125,12 +126,25 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
   const fill = dependencies.fillPasswordForm || fillPasswordForm;
   const open = dependencies.openLoginPage || openLoginPage;
   const awaitSession = dependencies.waitForSession || waitForSession;
+  const direct = dependencies.directPasswordLogin || directPasswordLogin;
   if (!options.force) {
     const existing = await read(options.profile);
     if (existing && hasCourseSession(existing)) {
       const valid = await progress('检查已有登录会话', () => verify(existing));
       if (valid === true) return '已有有效的本地会话；如需切换账号，运行 mooc-notes login --force。';
       if (valid === null) return '已有本地会话，但平台暂不可达，无法验证登录状态；可稍后重试。';
+    }
+  }
+  let directResult = { status: 'unsupported' };
+  if (credentials.username && credentials.password) {
+    directResult = await progress('尝试直接登录', () => direct(credentials)).catch(() => ({ status: 'unavailable' }));
+    if (directResult.status === 'success' && hasCourseSession(directResult.cookies || [])) {
+      const valid = await progress('验证登录状态', () => verify(directResult.cookies));
+      if (valid !== false) {
+        await save(directResult.cookies, options.profile);
+        return valid === true ? '直接登录成功，会话已保存。' :
+          '已保存直接登录会话，但平台暂不可达，无法验证课程权限。';
+      }
     }
   }
   const background = await launch({ ...options, headless: true });
@@ -152,7 +166,8 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
         ...authentication
       );
     }
-    if (credentials.username && credentials.password) {
+    if (credentials.username && credentials.password &&
+      !['challenge', 'invalid'].includes(directResult.status)) {
       const cookies = await progress('尝试使用本地账号登录', async () => {
         await open(background.page);
         const previous = sessionMarker(await cookiesFor(background.page));
