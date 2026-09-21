@@ -12,10 +12,14 @@ test('统一命令显示模式与课程样例，并指出旧命令替代方式',
   assert.match(help, /mooc-notes \[课程\] \[--mode 模式\]/);
   assert.match(help, /ZJU1-1460402161\?tid=1488053496/);
   assert.match(help, /video（获取链接后可选择带字幕播放）/);
+  assert.match(help, /mooc-notes config --player PATH/);
+  assert.doesNotMatch(help, /courses（账号课程）|list（目录）/);
   await assert.rejects(main(['export']), /旧命令已合并/);
+  await assert.rejects(main(['courses']), /已并入选课流程/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'unknown']), /未知模式/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'list']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'url']), /请使用 --mode video/);
-  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'notes', '--player', 'mpv']), /只适用于 video 模式/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'notes', '--player', 'mpv']), /只适用于 video 和 config 模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'video', '--subtitle-arg', '--subtitle']), /必须包含 \{file\}/);
 });
 
@@ -27,7 +31,7 @@ test('获取视频链接后按选择播放，非交互调用不会等待输入',
   const ui = {
     writeLink: (value) => calls.push(['link', value]),
     writeStatus: (value) => calls.push(['status', value]),
-    choose: async () => { calls.push(['choose']); return true; },
+    choose: async () => { calls.push(['choose']); return 'default'; },
     askText: async () => { calls.push(['ask']); return 'mpv'; },
     openInPlayer: async (player, value, subtitle, subtitleArg) => { calls.push(['open', player, value, subtitle, subtitleArg]); }
   };
@@ -44,12 +48,19 @@ test('获取视频链接后按选择播放，非交互调用不会等待输入',
   assert.deepEqual(calls, [['link', url], ['subtitle'], ['open', 'vlc', url, '/tmp/test-subtitle.srt', undefined], ['status', '已启动播放器：示例视频\n']]);
 
   calls.length = 0;
-  await presentVideoLink(stream, unit, { interactive: true, loadSubtitle }, { ...ui, choose: async () => false });
+  await presentVideoLink(stream, unit, { interactive: true, loadSubtitle }, { ...ui, choose: async () => 'link' });
   assert.deepEqual(calls, [['link', url]]);
 
   calls.length = 0;
-  await presentVideoLink(stream, unit, { interactive: true, loadSubtitle, subtitleArg: '--sub={file}' }, ui);
+  await presentVideoLink(stream, unit, { interactive: true, loadSubtitle, subtitleArg: '--sub={file}' },
+    { ...ui, choose: async () => { calls.push(['choose']); return 'other'; } });
   assert.deepEqual(calls, [['link', url], ['choose'], ['ask'], ['subtitle'], ['open', 'mpv', url, '/tmp/test-subtitle.srt', '--sub={file}'], ['status', '已启动播放器：示例视频\n']]);
+
+  calls.length = 0;
+  await presentVideoLink(stream, unit, { interactive: true, defaultPlayer: 'vlc', loadSubtitle },
+    { ...ui, choose: async () => { calls.push(['choose']); return 'other'; } });
+  assert.deepEqual(calls, [['link', url], ['choose'], ['ask'], ['subtitle'],
+    ['open', 'mpv', url, '/tmp/test-subtitle.srt', undefined], ['status', '已启动播放器：示例视频\n']]);
 
   calls.length = 0;
   await presentVideoLink(stream, unit, { interactive: false, player: 'mpv', loadSubtitle: async () => null }, ui);

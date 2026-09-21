@@ -132,3 +132,32 @@ export async function askText(message, { input = process.stdin, output = process
     }
   } finally { prompt.close(); }
 }
+
+export async function askSecret(message, { input = process.stdin, output = process.stderr } = {}) {
+  if (!input.isTTY || typeof input.setRawMode !== 'function') throw new Error('密码输入需要交互终端。');
+  const previousRawMode = input.isRaw;
+  let value = '';
+  emitKeypressEvents(input);
+  input.setRawMode(true);
+  input.resume();
+  output.write(`${message}（输入不回显）：`);
+  return new Promise((resolve, reject) => {
+    const finish = (error) => {
+      input.removeListener('keypress', onKey);
+      input.setRawMode(previousRawMode);
+      input.pause();
+      output.write('\n');
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const onKey = (character, key = {}) => {
+      if (key.ctrl && key.name === 'c') return finish(new Error('已取消操作。'));
+      if (key.name === 'return' || key.name === 'enter') {
+        if (value) return finish();
+        output.write('密码不能为空，请继续输入：');
+      } else if (key.name === 'backspace') value = value.slice(0, -1);
+      else if (character && !key.ctrl && !key.meta && character >= ' ') value += character;
+    };
+    input.on('keypress', onKey);
+  });
+}

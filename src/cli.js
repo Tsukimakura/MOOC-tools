@@ -1,27 +1,30 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { createInterface } from 'node:readline/promises';
 import { launchSession } from './browser.js';
-import { MoocApi, readSession, saveSession, syncBrowserSession } from './api.js';
+import { MoocApi, readSession, syncBrowserSession } from './api.js';
 import { captureUnit } from './capture.js';
 import { captureDocumentApi, captureVideoApi } from './api_capture.js';
+import { readConfig, updateConfig } from './config.js';
 import { groupLessons, safeName, selectLessons, selectUnits } from './course.js';
+import { login } from './login.js';
 import { openInPlayer, preparePlayerSubtitles, subtitleDirectory } from './player.js';
-import { askText, choose } from './prompt.js';
+import { askSecret, askText, choose } from './prompt.js';
 import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
   mooc-notes                         交互式菜单：选操作、课程和教学小节
-  mooc-notes login                   首次登录并保存本机会话
+  mooc-notes login                   自动尝试登录；需要验证时打开登录页
+  mooc-notes config                  设置登录账号和默认播放器
+  mooc-notes config --player PATH    直接设置默认播放器
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
 
-模式：notes（默认，图文纪要）、quizzes（小测）、list（目录）、
-      courses（账号课程）、video（获取链接后可选择带字幕播放）。
+模式：notes（默认，图文纪要）、quizzes（小测）、
+      video（获取链接后可选择带字幕播放）。
 PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取决于课程提供的字幕）。
 无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
 
@@ -29,12 +32,12 @@ PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取�
   https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496
 
 选项：
-  --mode MODE          notes、quizzes、list、courses 或 video
+  --mode MODE          notes、quizzes 或 video
   --browser PATH       Chrome/Chromium 可执行文件
   --profile DIR        浏览器本机会话目录；API 会话按此目录隔离
   --headless           需要网页采集时无界面运行
   --api-only           不启动浏览器；网页专属内容会标记缺失
-  --player PATH        video 模式获取链接后直接播放；也可设置 MOOC_NOTES_PLAYER 供交互选择
+  --player PATH        video 模式直接播放；config 模式保存默认播放器
   --subtitle-arg TEXT  其他播放器的字幕参数模板，例如 --sub-file={file}
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --lesson TEXT        导出一个教学小节的全部相关资源
@@ -44,7 +47,7 @@ PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取�
   --threshold NUMBER   画面变化阈值，默认 1
   --max-frames NUMBER  每个视频截图上限，默认 160
   --scan-mode MODE     seek（快速跳播，默认）或 realtime（实际播放，适合驻点小测）
-  --force              重新采集已完成的资源
+  --force              重新采集已完成资源；login 模式强制重新登录
   --help               显示帮助
   --version            显示版本`;
 
@@ -85,18 +88,6 @@ function parseArguments(argv) {
   return { options, positional };
 }
 
-async function login(page, profile) {
-  await page.goto('https://www.icourse163.org/', { waitUntil: 'domcontentloaded', timeout: 45_000 });
-  console.log('浏览器已打开。请在其中完成登录，然后回到终端。');
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try { await prompt.question('登录完成后按 Enter 保存本机会话…'); } finally { prompt.close(); }
-  const cookies = await page.browserContext().cookies('https://www.icourse163.org');
-  await saveSession(cookies, profile);
-  if (!cookies.some((cookie) => cookie.name === 'STUDY_SESS' || cookie.name === 'STUDY_PERSIST')) {
-    console.log('会话已保存；未能确认登录状态，运行 courses 可进一步验证。');
-  } else console.log('会话已保存。');
-}
-
 export function mergeCapturedRecord(previous, record, unit) {
   const saved = previous ? {
     ...record,
@@ -121,6 +112,32 @@ export function mergeCapturedRecord(previous, record, unit) {
 
 function requireTerminal(message) {
   if (!process.stdin.isTTY) throw new Error(message);
+}
+
+async function configure(options) {
+  if (options.player) {
+    await updateConfig({ player: options.player });
+    console.log('默认播放器已保存。');
+    return;
+  }
+  requireTerminal('设置需要交互终端；可用 mooc-notes config --player PATH 设置默认播放器。');
+  const action = await choose([
+    { label: '设置默认播放器路径或命令', value: 'player' },
+    { label: '设置中国大学 MOOC 账号和密码', value: 'account' },
+    { label: '清除已保存的账号和密码', value: 'clear' }
+  ], '本地设置');
+  if (action === 'player') {
+    await updateConfig({ player: await askText('播放器路径或命令') });
+    console.log('默认播放器已保存。');
+  } else if (action === 'account') {
+    const username = await askText('登录账号');
+    const password = await askSecret('登录密码');
+    await updateConfig({ username, password });
+    console.log('账号已保存在本机配置中；密码不会显示在终端。');
+  } else {
+    await updateConfig({ username: null, password: null });
+    console.log('已清除本机保存的账号和密码。');
+  }
 }
 
 async function chooseCourse(api) {
@@ -193,12 +210,17 @@ export async function presentVideoLink(stream, unit, options = {}, ui = {
   choose, askText, openInPlayer, writeLink: (url) => console.log(url), writeStatus: (message) => process.stderr.write(message)
 }) {
   ui.writeLink(stream.url);
-  const play = Boolean(options.player) || (options.interactive && await ui.choose([
-    { label: '仅保留视频链接', value: false },
-    { label: '发送到播放器', value: true }
-  ], '视频链接已获取，接下来要做什么？'));
-  if (!play) return;
-  const player = options.player || options.defaultPlayer || await ui.askText('请输入播放器程序路径或命令');
+  let player = options.player;
+  if (!player && options.interactive) {
+    const action = await ui.choose([
+      { label: '仅保留视频链接', value: 'link' },
+      ...(options.defaultPlayer ? [{ label: `用默认播放器播放：${options.defaultPlayer}`, value: 'default' }] : []),
+      { label: '输入其他播放器路径或命令', value: 'other' }
+    ], '视频链接已获取，接下来要做什么？');
+    if (action === 'default') player = options.defaultPlayer;
+    else if (action === 'other') player = await ui.askText('请输入播放器程序路径或命令');
+  }
+  if (!player) return;
   const subtitles = await options.loadSubtitle?.();
   if (!subtitles) ui.writeStatus('提示：当前课程会话未提供可读取的字幕，将只播放视频。\n');
   else if (typeof subtitles !== 'string') {
@@ -238,43 +260,53 @@ export async function main(argv) {
   if (options.version) { console.log(VERSION); return; }
   if (options.help || (!positional.length && !options.mode && !process.stdin.isTTY)) { console.log(HELP); return; }
   if (positional.length > 1) throw new Error('只能提供一个课程编号或链接。');
-  if (['courses', 'list', 'export', 'quizzes', 'video-url', 'play'].includes(positional[0])) {
+  if (['courses', 'list'].includes(positional[0])) {
+    throw new Error('课程列表和目录已并入选课流程；运行 mooc-notes 后选择功能和课程。');
+  }
+  if (['export', 'quizzes', 'video-url', 'play'].includes(positional[0])) {
     throw new Error('旧命令已合并；请使用 mooc-notes [课程] --mode 模式。运行 --help 查看示例。');
   }
   const loginRequested = positional[0] === 'login';
-  let command = loginRequested ? 'login' : options.mode || 'notes';
+  const configRequested = positional[0] === 'config';
+  let command = loginRequested ? 'login' : configRequested ? 'config' : options.mode || 'notes';
   if (!loginRequested && !positional.length && !options.mode && !options.lesson && !options.unit && !options.all) {
     command = await choose([
       { label: '导出教学小节的图文纪要（含视频与 Quiz）', value: 'notes' },
       { label: '获取教学小节的全部小测', value: 'quizzes' },
       { label: '获取视频链接，可继续发送到播放器', value: 'video' },
-      { label: '查看账号课程', value: 'courses' },
-      { label: '查看课程目录', value: 'list' },
-      { label: '登录中国大学 MOOC', value: 'login' }
+      { label: '登录中国大学 MOOC', value: 'login' },
+      { label: '设置账号或默认播放器', value: 'config' }
     ], '请选择操作');
   }
-  const input = loginRequested ? undefined : positional[0];
+  const input = loginRequested || configRequested ? undefined : positional[0];
   if (['url', 'play'].includes(command)) throw new Error('视频链接与播放器操作已合并；请使用 --mode video。');
-  if (!['login', 'courses', 'list', 'notes', 'quizzes', 'video'].includes(command)) throw new Error(`未知模式：${command}`);
-  if (options.mode && loginRequested) throw new Error('login 不支持 --mode。');
+  if (!['login', 'config', 'notes', 'quizzes', 'video'].includes(command)) throw new Error(`未知模式：${command}`);
+  if (options.mode && (loginRequested || configRequested)) throw new Error(`${command} 不支持 --mode。`);
   if (options.all && !['notes', 'quizzes'].includes(command)) throw new Error('--all 只适用于 notes 和 quizzes。');
-  if (options.player && command !== 'video') throw new Error('--player 只适用于 video 模式。');
+  if (options.player && !['video', 'config'].includes(command)) throw new Error('--player 只适用于 video 和 config 模式。');
   if (options.subtitleArg && command !== 'video') throw new Error('--subtitle-arg 只适用于 video 模式。');
   if (options.subtitleArg && !options.subtitleArg.includes('{file}')) throw new Error('--subtitle-arg 必须包含 {file} 占位符。');
-  if (options.unit && ['login', 'courses'].includes(command)) throw new Error('--unit 不适用于当前命令。');
+  if (options.unit && ['login', 'config'].includes(command)) throw new Error('--unit 不适用于当前命令。');
   if (options.lesson && !['notes', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 notes 和 quizzes。');
-  if (command === 'courses' && input) throw new Error('查看账号课程无需指定课程。');
-  if (!['login', 'courses'].includes(command) && !input) requireTerminal('请提供课程代码或链接；交互选择需要在终端中运行。');
+  if (!['login', 'config'].includes(command) && !input) requireTerminal('请提供课程代码或链接；交互选择需要在终端中运行。');
   if (['notes', 'quizzes'].includes(command) && !options.unit && !options.lesson && !options.all) {
     requireTerminal('默认只导出一个教学小节；请用 --lesson 指定小节、--unit 指定单项资源，或用 --all 导出整门课程。');
   }
-  if (command === 'login' && options.headless) throw new Error('login 需要打开可见浏览器，请移除 --headless。');
+  if (command === 'login' && options.headless) throw new Error('login 需要在验证时打开可见浏览器，请移除 --headless。');
   if (command === 'login' && options.apiOnly) throw new Error('login 需要浏览器，请移除 --api-only。');
   options.scanMode ||= command === 'quizzes' && !options.apiOnly ? 'realtime' : 'seek';
   if (options.apiOnly && options.scanMode === 'realtime') throw new Error('--api-only 与 --scan-mode realtime 不能同时使用。');
+  if (command === 'config') { await configure(options); return; }
   if (command === 'login') {
-    const { browser, page, userDataDir } = await launchSession(options);
-    try { await login(page, userDataDir); } finally { await browser.close(); }
+    const hasEnvironmentCredentials = Boolean(process.env.MOOC_NOTES_USERNAME || process.env.MOOC_NOTES_PASSWORD);
+    if (hasEnvironmentCredentials && !(process.env.MOOC_NOTES_USERNAME && process.env.MOOC_NOTES_PASSWORD)) {
+      throw new Error('MOOC_NOTES_USERNAME 和 MOOC_NOTES_PASSWORD 必须同时设置。');
+    }
+    const config = hasEnvironmentCredentials ? {} : await readConfig();
+    const credentials = hasEnvironmentCredentials ? {
+      username: process.env.MOOC_NOTES_USERNAME, password: process.env.MOOC_NOTES_PASSWORD
+    } : { username: config.username, password: config.password };
+    console.log(await login(options, credentials));
     return;
   }
   let cookies = await readSession(options.profile);
@@ -296,35 +328,22 @@ export async function main(argv) {
     return page;
   };
   try {
-    if (command === 'courses') {
-      const courses = await withProgress('读取账号课程', () => api.accountCourses());
-      if (!courses.length) { console.log('当前账号没有可列出的中国大学 MOOC 课程。'); return; }
-      console.log(`当前账号的课程（${courses.length} 门）`);
-      for (const [index, course] of courses.entries()) {
-        console.log(`${index + 1}. ${course.title} · ${course.slug} · tid=${course.termId}`);
-      }
-      return;
-    }
     const selectedCourse = input || await chooseCourse(api);
     const course = await withProgress('读取课程目录', () => api.course(selectedCourse));
     if (command === 'video') {
+      const defaultPlayer = (options.player || !process.stdin.isTTY) ? undefined :
+        process.env.MOOC_NOTES_PLAYER || (await readConfig()).player;
       const unit = await chooseVideo(course, options.unit);
       const stream = await withProgress('获取视频授权地址', () => videoStreamWithRetry(api, unit));
       await presentVideoLink(stream, unit, {
         player: options.player,
-        defaultPlayer: process.env.MOOC_NOTES_PLAYER,
+        defaultPlayer,
         interactive: Boolean(process.stdin.isTTY),
         subtitleArg: options.subtitleArg,
         loadSubtitle: () => withProgress('获取同步字幕', () => preparePlayerSubtitles(
           api, unit, stream, subtitleDirectory(options.profile, course, unit)
         ))
       });
-      return;
-    }
-    if (command === 'list') {
-      const selected = selectUnits(course, options.unit);
-      console.log(`${course.title} (${course.slug}, tid=${course.termId})`);
-      for (const unit of selected) console.log(`${unit.id}\t${unit.type}\t${unit.chapter} / ${unit.lesson} / ${unit.name}`);
       return;
     }
     const resources = await chooseResources(course, command, options);

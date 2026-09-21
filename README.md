@@ -17,11 +17,16 @@ mooc-notes --help
 ## 使用
 
 ```bash
-mooc-notes login   # 首次在浏览器中登录，按提示回终端保存会话
+mooc-notes config  # 按需设置账号密码和默认播放器
+mooc-notes login   # 优先复用会话或自动登录；需要验证时打开登录页
 mooc-notes         # 交互菜单：选操作、课程、教学小节
 ```
 
-菜单支持方向键、关键词筛选与 Enter 确认。选课时可以从账号课程中选择，也可以手动输入课程 ID 或链接。**默认只处理一个教学小节**；只有 `--all` 才处理整门课程。
+菜单支持方向键、关键词筛选与 Enter 确认。选课时会显示账号课程，也可以手动输入课程 ID 或链接；选择教学小节或视频时会显示相应目录。**默认只处理一个教学小节**；只有 `--all` 才处理整门课程。
+
+`config` 可在本机保存登录账号、密码和播放器路径。也可用 `mooc-notes config --player '/mnt/c/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe'` 直接设置默认播放器。密码输入不回显；如果不希望保存密码，可同时设置环境变量 `MOOC_NOTES_USERNAME` 和 `MOOC_NOTES_PASSWORD`，登录时会优先使用它们。配置文件保存在用户状态目录 `mooc-notes-cli/config.json`，不是项目目录；密码以明文保存在只有当前用户可读的文件中。运行 `mooc-notes config` 可以清除已保存的账号密码。
+
+`login` 先检查已有会话。配置了账号密码时，工具尝试在无界面浏览器中填写平台登录表单；自动登录未成功时，会打开中国大学 MOOC 的[专用登录页](https://www.icourse163.org/member/login.htm)，供你完成验证码或手动登录。检测到课程会话后会自动保存并关闭浏览器，不再要求回终端按 Enter。切换账号或强制重新登录用 `mooc-notes login --force`。平台公开的[单点登录接口](https://docs.icourse163.org/api-doc/login-intergration.html)需要分配给机构的应用密钥，因此个人账号登录不调用该接口；网页表单变化时仍可手动完成登录。
 
 脚本中使用统一格式 `mooc-notes [课程] --mode 模式`。模式如下：
 
@@ -29,8 +34,6 @@ mooc-notes         # 交互菜单：选操作、课程、教学小节
 | --- | --- |
 | `notes`（默认） | 导出字幕、截图、课件和小测 |
 | `quizzes` | 仅收集视频驻点小测和课后 Quiz |
-| `list` | 查看课程目录与资源 ID |
-| `courses` | 查看账号课程与期次，无须课程参数 |
 | `video` | 获取一个视频的授权链接，再选择是否交给播放器 |
 
 课程参数示例：
@@ -42,12 +45,6 @@ mooc-notes         # 交互菜单：选操作、课程、教学小节
 课程编号或纯数字 ID 需要当前账号已参加课程，工具会从账号课程列表解析期次。完整链接中的 `tid` 可直接指定期次。以上是公开课程标识示例，不是账号标识；课程可用性仍取决于当前登录会话。
 
 ```bash
-# 列出账号中的课程与期次
-mooc-notes --mode courses
-
-# 查看目录，找出教学小节和资源 ID
-mooc-notes 'ZJU1-1460402161' --mode list
-
 # 导出一段指定视频；也可用 --lesson 1278585470 导出整个教学小节
 mooc-notes 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496' --unit 1320673525
 
@@ -57,13 +54,13 @@ mooc-notes 1460402161 --mode quizzes --lesson 1278585470
 # 获取视频链接；在交互终端中可接着选择是否播放
 mooc-notes ZJU1-1460402161 --mode video --unit 1320673525
 
-# 在脚本中获取链接后直接交给播放器，并自动加载课程字幕
+# 在脚本中指定播放器，获取链接后直接播放并加载课程字幕
 mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 --player mpv
 
 # 使用 VLC
 mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 --player vlc
 
-# 在 WSL 中使用 Windows 版 PotPlayer（按实际安装路径调整）
+# 在 WSL 中临时使用 Windows 版 PotPlayer（按实际安装路径调整）
 mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 \
   --player '/mnt/c/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe'
 ```
@@ -84,7 +81,7 @@ downloads/<课程编号>-<期次>/
 
 课程列表、目录、视频链接、字幕、驻点题和可下载课件优先通过当前会话的课程接口获取。通常用 `ffmpeg` 从授权视频流取帧，检测画面变化并等待画面稳定后保存；接口或媒体处理缺项时才按需打开浏览器补采。终端会显示采集阶段、已用时间，以及可计算进度时的进度条。重复运行会跳过已完成资源，并保留先前取得的字幕、截图和题目。
 
-`video` 模式先将链接写到标准输出。交互终端会继续询问是否发送到播放器；非交互运行只输出链接，适合复制或接入脚本。指定 `--player PATH` 会在获取链接后直接播放；`MOOC_NOTES_PLAYER` 仅用作交互时所选播放器的默认程序。
+`video` 模式先将链接写到标准输出。交互终端可选择仅保留链接、用已配置的默认播放器播放，或临时输入其他播放器路径。非交互运行只输出链接，适合复制或接入脚本。指定 `--player PATH` 会在获取链接后直接播放；交互选择时，`MOOC_NOTES_PLAYER` 可临时覆盖本地保存的默认播放器。
 
 选择播放后，工具会读取该课时所有可用的课程字幕轨，并按内容识别中文、英文。两种字幕都有时，还会按起止时间合成双语字幕（上方中文、下方英文）。PotPlayer 使用一个含「中文 / English / 双语」选项的多语言 SMI 文件，在播放器的字幕语言菜单中切换；[mpv](https://mpv.io/manual/stable/) 会加载三条独立字幕轨，按 `j` 或 `J` 切换。[VLC](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/subtitles.html) 和 `--subtitle-arg` 自定义播放器默认加载中文 SRT，可在播放器中手动添加保存的英文或双语 SRT。若当前课程会话只提供英文，工具会明确提示，无法凭空生成中文或双语字幕。这是课程字幕同步播放，不是语音实时转写或机器翻译。
 
@@ -94,7 +91,7 @@ downloads/<课程编号>-<期次>/
 
 - 字幕依赖课程提供的字幕轨，不做语音识别。按间隔采样可能遗漏短暂画面变化；动画较多时可减小 `--interval`。视频流、课件或 Quiz 未向当前会话开放时，会在纪要中标明缺失。
 - 工具只保存课程已向当前会话提供的题目、答案和解析，不会开始或提交测验。部分答案或无锚点的驻点题可能无法获取；实时播放遇到必须手动操作的小测时，后续扫描可能中断。
-- API 会话保存在用户状态目录的 `mooc-notes-cli/session-*.json`，浏览器资料位于其 `browser/` 子目录；可用 `XDG_STATE_HOME` 和 `--profile` 调整。会话文件仅保留课程请求需要的 Cookie，仍代表登录状态。不要分享会话文件、授权视频链接、抓包记录或 `downloads/`。
+- API 会话保存在用户状态目录的 `mooc-notes-cli/session-*.json`，浏览器资料位于其 `browser/` 子目录；可用 `XDG_STATE_HOME` 和 `--profile` 调整。登录配置保存在同目录的 `config.json`。会话文件仅保留课程请求需要的 Cookie，仍代表登录状态；配置文件可能含有明文密码。不要分享这些文件、授权视频链接、抓包记录或 `downloads/`。
 - 本项目忽略本地下载、浏览器资料和日志。提交问题时请先删除 Cookie、用户编号、签名、个人信息和课程媒体文件。测试样例请使用虚构数据。
 
 仅整理自己有权访问且可供个人学习的内容，并遵守课程方规则。

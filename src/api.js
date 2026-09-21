@@ -83,9 +83,11 @@ function cookieHeader(cookies, url) {
 }
 
 export class MoocApi {
-  constructor(cookies, fetchImpl = fetch) {
+  constructor(cookies, fetchImpl = fetch, { timeout = 30_000, retries = 2 } = {}) {
     this.cookies = cookies.filter(validCookie);
     this.fetch = fetchImpl;
+    this.timeout = timeout;
+    this.retries = retries;
     this.memberId = null;
   }
 
@@ -95,13 +97,13 @@ export class MoocApi {
     return value;
   }
 
-  async request(url, { method = 'GET', body, timeout = 30_000, auth = true, text = false } = {}) {
+  async request(url, { method = 'GET', body, timeout = this.timeout, retries = this.retries, auth = true, text = false } = {}) {
     const target = new URL(url, ORIGIN);
     if (target.protocol !== 'https:' || !['www.icourse163.org', 'vod.study.163.com'].includes(target.hostname)) {
       throw new Error('不支持的 API 主机。');
     }
     let lastError;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const headers = { Referer: `${ORIGIN}/` };
         if (method === 'POST') {
@@ -117,7 +119,7 @@ export class MoocApi {
         return text ? response.text() : response.json();
       } catch (error) {
         lastError = error;
-        if (attempt === 2 || !/fetch failed|network|timed out|timeout|ECONNRESET|HTTP 5\d\d/i.test(error.message)) break;
+        if (attempt === retries || !/fetch failed|network|timed out|timeout|ECONNRESET|HTTP 5\d\d/i.test(error.message)) break;
         await wait(800 * (attempt + 1));
       }
     }
@@ -128,6 +130,13 @@ export class MoocApi {
     return this.request(`/web/j/${name}.rpc?csrfKey=${encodeURIComponent(this.csrf())}`, {
       method: 'POST', body: new URLSearchParams(params)
     });
+  }
+
+  async sessionActive() {
+    const data = await this.rpc('learnerCourseRpcBean.getMyLearnedCoursePanelList', {
+      type: '30', p: '1', psize: '1', courseType: '1'
+    });
+    return Array.isArray(data?.result?.result);
   }
 
   async accountCourses() {
