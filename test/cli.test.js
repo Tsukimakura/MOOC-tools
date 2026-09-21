@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chooseResources, main, mergeCapturedRecord, presentVideoLink } from '../src/cli.js';
 
-test('统一命令显示模式与课程样例，并指出旧命令替代方式', async () => {
+test('统一命令显示模式与课程样例，并拒绝无效课程或模式', async () => {
   const original = console.log;
   let help = '';
   try {
@@ -16,12 +16,12 @@ test('统一命令显示模式与课程样例，并指出旧命令替代方式',
   assert.match(help, /mooc-notes login --manual/);
   assert.doesNotMatch(help, /quizzes（小测）|notes、quizzes/);
   assert.doesNotMatch(help, /courses（账号课程）|list（目录）/);
-  await assert.rejects(main(['export']), /旧命令已合并/);
-  await assert.rejects(main(['courses']), /已并入选课流程/);
+  await assert.rejects(main(['export']), /课程参数不是有效/);
+  await assert.rejects(main(['courses']), /课程参数不是有效/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'unknown']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'list']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'quizzes']), /未知模式/);
-  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'url']), /请使用 --mode video/);
+  await assert.rejects(main(['ZJU1-1460402161', '--mode', 'url']), /未知模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'notes', '--player', 'mpv']), /只适用于 video 和 config 模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--manual']), /只适用于 login 模式/);
   await assert.rejects(main(['ZJU1-1460402161', '--mode', 'video', '--subtitle-arg', '--subtitle']), /必须包含 \{file\}/);
