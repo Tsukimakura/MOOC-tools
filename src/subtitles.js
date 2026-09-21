@@ -46,6 +46,59 @@ export function formatSrt(cues) {
   return `${cues.map((cue, index) => `${index + 1}\n${srtTime(cue.start)} --> ${srtTime(cue.end)}\n${cue.text}`).join('\n\n')}\n\n`;
 }
 
+function subtitleTimeline(tracks) {
+  const events = new Map();
+  const active = Object.fromEntries(Object.keys(tracks).map((language) => [language, new Map()]));
+  for (const [language, cues] of Object.entries(tracks)) {
+    for (const [index, cue] of cues.entries()) {
+      const start = Math.round(cue.start * 1000);
+      const end = Math.round(cue.end * 1000);
+      if (start < 0 || end <= start) continue;
+      if (!events.has(start)) events.set(start, []);
+      if (!events.has(end)) events.set(end, []);
+      events.get(start).push({ language, index, text: cue.text, start: true });
+      events.get(end).push({ language, index, start: false });
+    }
+  }
+  return [...events.keys()].sort((a, b) => a - b).map((time) => {
+    for (const event of events.get(time)) if (!event.start) active[event.language].delete(event.index);
+    for (const event of events.get(time)) if (event.start) active[event.language].set(event.index, event.text);
+    return {
+      time,
+      text: Object.fromEntries(Object.entries(active).map(([language, cues]) =>
+        [language, [...cues.values()].join('\n')]))
+    };
+  });
+}
+
+export function bilingualCues(chinese, english) {
+  const timeline = subtitleTimeline({ zh: chinese, en: english });
+  const combined = [];
+  for (let index = 0; index < timeline.length - 1; index++) {
+    const start = timeline[index].time / 1000;
+    const end = timeline[index + 1].time / 1000;
+    const text = [timeline[index].text.zh, timeline[index].text.en].filter(Boolean).join('\n');
+    if (!text || end <= start) continue;
+    const previous = combined.at(-1);
+    if (previous?.text === text && previous.end === start) previous.end = end;
+    else combined.push({ start, end, text });
+  }
+  return combined;
+}
+
+function escapeSami(text) {
+  return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;').replaceAll('\n', '<BR>') || '&nbsp;';
+}
+
+export function formatSami(chinese, english) {
+  const tracks = { ZHCC: chinese, ENCC: english, MULCC: bilingualCues(chinese, english) };
+  const timeline = subtitleTimeline(tracks);
+  const syncs = timeline.map(({ time, text }) => `<SYNC Start=${time}>\n${Object.entries(text)
+    .map(([language, content]) => `<P Class=${language}>${escapeSami(content)}</P>`).join('\n')}`).join('\n');
+  return `\uFEFF<SAMI>\n<HEAD>\n<META http-equiv="Content-Type" content="text/html; charset=utf-8">\n<STYLE TYPE="text/css">\n<!--\n.ZHCC {Name: 中文; lang: zh-CN; SAMIType: CC;}\n.ENCC {Name: English; lang: en-US; SAMIType: CC;}\n.MULCC {Name: 双语; lang: mul; SAMIType: CC;}\n-->\n</STYLE>\n</HEAD>\n<BODY>\n${syncs}\n</BODY>\n</SAMI>\n`;
+}
+
 export function formatTime(seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0));
   const hours = Math.floor(total / 3600);
