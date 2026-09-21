@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readManifest, renderNotes, renderQuizIndex, saveExport } from '../src/render.js';
+import { lessonDirectoryName, readManifest, renderNotes, renderQuizIndex, saveExport } from '../src/render.js';
 
 const course = { slug: 'TEST-1', termId: '2', title: '演示课', units: [{ id: '3' }] };
 const record = {
@@ -32,5 +32,33 @@ test('完整导出在中断后可读取清单继续', async () => {
     await saveExport(directory, manifest, course);
     assert.equal((await readManifest(directory, course)).records['3'].questions.length, 1);
     assert.match(await readFile(path.join(directory, 'quizzes.md'), 'utf8'), /小测问题？/);
+    const lessonDirectory = path.join(directory, 'lessons', lessonDirectoryName(record));
+    assert.match(await readFile(path.join(directory, 'README.md'), 'utf8'), /图文纪要/);
+    assert.match(await readFile(path.join(lessonDirectory, 'notes.md'), 'utf8'), /\.\.\/\.\.\/assets\/3\/frame-0001\.png/);
+    assert.match(await readFile(path.join(lessonDirectory, 'quizzes.md'), 'utf8'), /小测问题？/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('不同教学小节分别生成文档且保留课程合并纪要', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'mooc-notes-lessons-'));
+  const another = {
+    ...record, id: '4', lessonId: '22', lessonIndex: 1, lesson: '第二节', name: '继续学习',
+    screenshots: [], cues: [{ start: 1, end: 2, text: '第二节字幕' }], questions: []
+  };
+  const completeCourse = { ...course, units: [course.units[0], { id: '4' }] };
+  try {
+    const manifest = await readManifest(directory, completeCourse);
+    manifest.records[record.id] = record;
+    await saveExport(directory, manifest, completeCourse);
+    manifest.records[another.id] = another;
+    await saveExport(directory, manifest, completeCourse);
+    const firstNotes = await readFile(path.join(directory, 'lessons', lessonDirectoryName(record), 'notes.md'), 'utf8');
+    const secondNotes = await readFile(path.join(directory, 'lessons', lessonDirectoryName(another), 'notes.md'), 'utf8');
+    const combined = await readFile(path.join(directory, 'notes.md'), 'utf8');
+    assert.match(firstNotes, /先说这句话/);
+    assert.doesNotMatch(firstNotes, /第二节字幕/);
+    assert.match(secondNotes, /第二节字幕/);
+    assert.match(combined, /先说这句话/);
+    assert.match(combined, /第二节字幕/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
