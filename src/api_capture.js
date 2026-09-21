@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { resourceUrlsFromDwr, subtitleUrlsFromDwr } from './resources.js';
+import { downloadSubtitleTracks, resourceUrlsFromDwr, subtitleUrlsFromDwr } from './resources.js';
 import { captureStreamFrames } from './stream.js';
-import { dedupeCues, parseSubtitle } from './subtitles.js';
+import { dedupeCues } from './subtitles.js';
 import { missingVideoAnchors } from './quiz.js';
 
 function newRecord(unit) {
@@ -13,14 +13,7 @@ function newRecord(unit) {
 }
 
 async function subtitleCues(api, urls) {
-  const cues = [];
-  for (const url of [...new Set(urls)]) {
-    try {
-      const resource = await api.download(url, 5_000_000);
-      if (resource) cues.push(...parseSubtitle(resource.bytes.toString('utf8')));
-    } catch { /* Try the next subtitle track. */ }
-  }
-  return dedupeCues(cues);
+  return dedupeCues((await downloadSubtitleTracks(api, urls)).flat());
 }
 
 export async function captureVideoApi(api, unit, assetRoot, options = {}) {
