@@ -13,7 +13,7 @@
 | 多语言字幕 | 课程同时提供中英文字幕时，可切换中文、English 和双语字幕 |
 | 断点续跑 | 保存采集清单，重复运行时跳过已完成资源并保留已有结果 |
 
-工具默认只处理一个教学小节，避免误下载整门课程。只有明确传入 `--all` 才处理全部已发布资源。
+工具会让你勾选一个或多个教学小节，避免误下载整门课程。只有明确传入 `--all` 才处理全部已发布资源。
 
 ## 环境要求
 
@@ -38,17 +38,17 @@ mooc-notes --help
 ## 快速开始
 
 ```bash
-# 可选：保存手机号或邮箱、密码以及默认播放器
+# 可选：保存手机号或邮箱、密码、下载根目录以及默认播放器
 mooc-notes config
 
 # 优先复用会话或直接登录；需要验证时自动打开专用登录页
 mooc-notes login
 
-# 打开交互菜单，依次选择功能、课程和教学小节
+# 打开交互菜单，依次选择功能、课程和一个或多个教学小节
 mooc-notes
 ```
 
-交互菜单支持方向键、关键词筛选和 Enter 确认。选课列表来自当前账号，也可手动输入课程代码或完整链接。
+交互菜单支持方向键和关键词筛选。选择教学小节时按 Space 勾选或取消、Enter 确认，按 Ctrl+A 可选择当前筛选结果。选课列表来自当前账号，也可手动输入课程代码或完整链接。
 
 ## 登录
 
@@ -60,7 +60,7 @@ mooc-notes
 
 直接登录按照登录页当前使用的协议，在本机完成密码加密、短时计算验证和 Cookie 同步。平台要求图片验证码、滑块、短信或账号保护验证时，工具会打开[中国大学 MOOC 登录页](https://www.icourse163.org/member/login.htm)，预填可用信息。检测到课程会话后会保存会话并自动关闭浏览器。
 
-`mooc-notes config` 可设置或清除本地账号密码，也可设置默认播放器。密码输入不回显，但选择保存时会以明文写入仅当前用户可读的配置文件。若不希望保存密码，可设置环境变量：
+`mooc-notes config` 可设置或清除本地账号密码，也可设置默认下载根目录和播放器。密码输入不回显，但选择保存时会以明文写入仅当前用户可读的配置文件。若不希望保存密码，可设置环境变量：
 
 ```bash
 export MOOC_NOTES_USERNAME='手机号或邮箱'
@@ -77,8 +77,8 @@ mooc-notes login
 ```text
 mooc-notes
 mooc-notes login [--force | --manual]
-mooc-notes config [--player PATH]
-mooc-notes [课程] [--mode notes|video] [--lesson ID | --unit ID | --all]
+mooc-notes config [--player PATH | --output DIR]
+mooc-notes [课程] [--mode notes|video] [--lesson ID ... | --unit ID | --all]
 ```
 
 | 模式 | 用途 |
@@ -104,11 +104,28 @@ mooc-notes 'https://www.icourse163.org/learn/ZJU1-1460402161?tid=1488053496' \
 # 导出整个教学小节，包含其中视频驻点小测和课后 Quiz
 mooc-notes 1460402161 --mode notes --lesson 1278585470
 
+# 一次导出多个教学小节；也可直接在交互菜单中勾选
+mooc-notes 1460402161 --mode notes \
+  --lesson 1278585470 --lesson 1278585471
+
 # 明确导出整门课程
 mooc-notes ZJU1-1460402161 --mode notes --all
 ```
 
-`--unit` 选单项资源，`--lesson` 选一个教学小节，`--all` 选整门课程。可用 `--output DIR` 更改输出目录，`--force` 重新采集已有资源。
+`--unit` 选单项资源，`--lesson` 选教学小节且可重复使用，`--all` 选整门课程。`--force` 会重新采集已有资源。
+
+默认下载根目录可在交互设置中修改，也可直接设置：
+
+```bash
+# 后续课程保存到 /data/mooc/<课程代码>-<期次>/
+mooc-notes config --output /data/mooc
+
+# 只临时覆盖一次，并把当前课程直接保存到指定目录
+mooc-notes ZJU1-1460402161 --lesson 1278585470 --output /data/one-course
+
+# 环境变量临时覆盖已保存的下载根目录
+MOOC_NOTES_OUTPUT=/data/mooc mooc-notes ZJU1-1460402161 --lesson 1278585470
+```
 
 视频采样可用 `--interval SEC`、`--threshold NUMBER` 和 `--max-frames NUMBER` 调整。`--scan-mode realtime` 会在浏览器中实际播放，适合检查接口未提供的驻点小测。`--api-only` 会禁止网页补采。完整参数见 `mooc-notes --help`。
 
@@ -137,11 +154,20 @@ mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 \
 
 ```text
 downloads/<课程代码>-<期次>/
-├── notes.md       # 按章节、课时与时间线排列的图文纪要
-├── quizzes.md     # 按教学小节汇总的小测索引
-├── manifest.json  # 断点续跑记录
-└── assets/        # 截图、题目配图与课件
+├── README.md           # 已导出教学小节的入口索引
+├── notes.md            # 当前课程所有已导出内容的合并纪要
+├── quizzes.md          # 当前课程所有已获取小测的合并索引
+├── manifest.json       # 断点续跑记录
+├── lessons/
+│   ├── 02-01-<小节ID>-<小节名称>/
+│   │   ├── notes.md    # 只包含该教学小节
+│   │   └── quizzes.md  # 只包含该教学小节的小测
+│   └── ...
+└── assets/
+    └── <资源ID>/       # 视频截图、题目配图和课件
 ```
+
+每次采集都会根据 `manifest.json` 重建课程合并文档，并为每个教学小节写入独立目录。随后下载同一课程的其他小节时，已经保存的小节仍会保留；重复下载同一资源时只有该资源会按断点状态跳过或在 `--force` 下更新。
 
 课程列表、目录、视频链接、字幕、驻点题和课件优先通过课程接口获取。视频截图通常由 `ffmpeg` 完成；接口或媒体处理缺项时才启动浏览器补采。终端会显示采集阶段、耗时和可计算进度时的进度条。
 
