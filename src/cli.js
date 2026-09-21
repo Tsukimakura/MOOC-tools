@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { launchSession } from './browser.js';
 import { MoocApi, readSession, syncBrowserSession } from './api.js';
 import { captureUnit } from './capture.js';
@@ -13,7 +14,7 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.11.1';
+const { version: VERSION } = createRequire(import.meta.url)('../package.json');
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：

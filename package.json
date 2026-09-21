@@ -6,12 +6,35 @@
   "bin": {
     "mooc-notes": "./bin/mooc-notes.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "CHANGELOG.md",
+    "SECURITY.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tsukimakura/MOOC-tools.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Tsukimakura/MOOC-tools/issues"
+  },
+  "homepage": "https://github.com/Tsukimakura/MOOC-tools#readme",
+  "keywords": [
+    "cli",
+    "mooc",
+    "icourse163",
+    "course-notes",
+    "subtitles"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
+    "check": "node --check bin/mooc-notes.js && node --check src/api.js && node --check src/api_capture.js && node --check src/auth.js && node --check src/browser.js && node --check src/capture.js && node --check src/cli.js && node --check src/config.js && node --check src/course.js && node --check src/direct_login.js && node --check src/frames.js && node --check src/login.js && node --check src/media.js && node --check src/player.js && node --check src/progress.js && node --check src/prompt.js && node --check src/quiz.js && node --check src/render.js && node --check src/resources.js && node --check src/stream.js && node --check src/subtitles.js",
     "test": "node --test",
-    "check": "node --check bin/mooc-notes.js && node --check src/api.js && node --check src/api_capture.js && node --check src/auth.js && node --check src/browser.js && node --check src/capture.js && node --check src/cli.js && node --check src/config.js && node --check src/course.js && node --check src/direct_login.js && node --check src/frames.js && node --check src/login.js && node --check src/media.js && node --check src/player.js && node --check src/progress.js && node --check src/prompt.js && node --check src/quiz.js && node --check src/render.js && node --check src/resources.js && node --check src/stream.js && node --check src/subtitles.js"
+    "validate": "npm run check && npm test",
+    "prepack": "npm run validate"
   },
   "dependencies": {
     "puppeteer-core": "^25.11.0"
