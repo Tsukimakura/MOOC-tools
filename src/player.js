@@ -22,7 +22,9 @@ export function playerArguments(executable, url, subtitleFile, subtitleArg) {
   }
   const name = playerName(executable);
   if (name === 'mpv' || name === 'vlc' || name === 'cvlc') return [`--sub-file=${subtitleFile}`, url];
-  throw new Error('此播放器的字幕参数未知；请改用 mpv/VLC，或用 --subtitle-arg 指定含 {file} 的参数模板。');
+  // PotPlayer's bundled CmdLine64.txt documents: PotPlayerMini64.exe "file" [options].
+  if (['potplayermini64', 'potplayermini', 'potplayer'].includes(name)) return [url, `/sub=${subtitleFile}`];
+  throw new Error('此播放器的字幕参数未知；请改用 mpv/VLC/PotPlayer，或用 --subtitle-arg 指定含 {file} 的参数模板。');
 }
 
 async function playerSubtitlePath(executable, subtitleFile) {

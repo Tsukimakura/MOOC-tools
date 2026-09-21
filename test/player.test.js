@@ -5,11 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { playerArguments, preparePlayerSubtitle, subtitleDirectory } from '../src/player.js';
 
-test('mpv、VLC 和自定义播放器收到视频与同步字幕参数', () => {
+test('mpv、VLC、PotPlayer 和自定义播放器收到视频与同步字幕参数', () => {
   const url = 'https://vod.study.163.com/video.m3u8';
   const file = '/tmp/subtitle.srt';
   assert.deepEqual(playerArguments('mpv', url, file), [`--sub-file=${file}`, url]);
   assert.deepEqual(playerArguments('C:\\Program Files\\VideoLAN\\VLC\\vlc.exe', url, file), [`--sub-file=${file}`, url]);
+  const windowsSubtitle = '\\\\wsl.localhost\\Ubuntu\\tmp\\subtitle.srt';
+  assert.deepEqual(playerArguments('/mnt/c/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe', url, windowsSubtitle),
+    [url, `/sub=${windowsSubtitle}`]);
   assert.deepEqual(playerArguments('other-player', url, file, '--subtitle={file}'), [`--subtitle=${file}`, url]);
   assert.deepEqual(playerArguments('other-player', url, null), [url]);
   assert.throws(() => playerArguments('other-player', url, file), /字幕参数未知/);

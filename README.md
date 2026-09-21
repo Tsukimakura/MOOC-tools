@@ -62,6 +62,10 @@ mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 --player mpv
 
 # 使用 VLC
 mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 --player vlc
+
+# 在 WSL 中使用 Windows 版 PotPlayer（按实际安装路径调整）
+mooc-notes ZJU1-1460402161 --mode video --unit 1320673525 \
+  --player '/mnt/c/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe'
 ```
 
 `--unit` 选单项资源，`--lesson` 选一个教学小节，`--all` 明确选整门课程。`--output DIR` 更改输出目录；`--force` 重新采集已有资源。使用 `--api-only` 可禁止网页补采。视频采样可用 `--interval SEC`、`--threshold NUMBER` 和 `--max-frames NUMBER` 调整；`--scan-mode realtime` 在浏览器中实际播放，适合检查接口未提供的驻点小测。查看完整参数运行 `mooc-notes --help`。
@@ -82,7 +86,7 @@ downloads/<课程编号>-<期次>/
 
 `video` 模式先将链接写到标准输出。交互终端会继续询问是否发送到播放器；非交互运行只输出链接，适合复制或接入脚本。指定 `--player PATH` 会在获取链接后直接播放；`MOOC_NOTES_PLAYER` 仅用作交互时所选播放器的默认程序。
 
-选择播放后，工具会下载该课时第一条可读取的课程字幕，生成带时间戳的 SRT 文件并交给播放器，使字幕随播放进度显示。这是课程字幕同步播放，不是语音实时转写。内置 [mpv](https://mpv.io/manual/stable/) 与 [VLC](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/subtitles.html) 的字幕参数；其他播放器可用 `--subtitle-arg '参数={file}'` 提供其单参数模板。若没有可读取的课程字幕，会提示并继续播放视频。字幕文件保存在用户状态目录 `mooc-notes-cli/subtitles/`，仅当前用户可读；播放器退出后仍保留，供再次播放使用。在 WSL 中调用 `.exe` 播放器时，工具通过 `wslpath` 转换字幕路径。播放器需要支持平台返回的 HLS 或 MP4；授权链接过期后重新获取即可。
+选择播放后，工具会下载该课时第一条可读取的课程字幕，生成带时间戳的 SRT 文件并交给播放器，使字幕随播放进度显示。这是课程字幕同步播放，不是语音实时转写。内置 [mpv](https://mpv.io/manual/stable/)、[VLC](https://docs.videolan.me/vlc-user/desktop/3.0/en/basic/subtitles.html) 和 Windows PotPlayer 的字幕参数；其他播放器可用 `--subtitle-arg '参数={file}'` 提供其单参数模板。若没有可读取的课程字幕，会提示并继续播放视频。字幕文件保存在用户状态目录 `mooc-notes-cli/subtitles/`，仅当前用户可读；播放器退出后仍保留，供再次播放使用。在 WSL 中调用 `.exe` 播放器时，工具通过 `wslpath` 转换字幕路径。播放器需要支持平台返回的 HLS 或 MP4；授权链接过期后重新获取即可。
 
 ## 限制与隐私
 
