@@ -27,6 +27,22 @@ test('登录使用专用登录页，并优先复用现有课程会话', async ()
   assert.match(result, /已有有效的本地会话/);
 });
 
+test('手机号直接登录成功时不启动浏览器', async () => {
+  const saved = [];
+  const result = await login({ profile: '/tmp/direct-profile' }, {
+    username: '13800138000', password: 'secret'
+  }, {
+    readSession: async () => null,
+    directPasswordLogin: async () => ({ status: 'success', cookies: session }),
+    verifySession: async () => true,
+    saveSession: async (...args) => saved.push(args),
+    withProgress: async (_label, action) => action(),
+    launchSession: async () => { throw new Error('不应启动浏览器'); }
+  });
+  assert.match(result, /直接登录成功/);
+  assert.deepEqual(saved, [[session, '/tmp/direct-profile']]);
+});
+
 test('配置的账号先尝试无界面登录，成功后保存并关闭浏览器', async () => {
   const state = { value: [] };
   const background = fakeBrowser(state);
