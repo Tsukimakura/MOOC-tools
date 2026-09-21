@@ -5,7 +5,7 @@ import { MoocApi, readSession, syncBrowserSession } from './api.js';
 import { captureUnit } from './capture.js';
 import { captureDocumentApi, captureVideoApi } from './api_capture.js';
 import { readConfig, updateConfig } from './config.js';
-import { groupLessons, safeName, selectLessons, selectUnits } from './course.js';
+import { groupLessons, parseCourseInput, safeName, selectLessons, selectUnits } from './course.js';
 import { login } from './login.js';
 import { openInPlayer, preparePlayerSubtitles, subtitleDirectory } from './player.js';
 import { askSecret, askText, choose } from './prompt.js';
@@ -269,12 +269,6 @@ export async function main(argv) {
   if (options.version) { console.log(VERSION); return; }
   if (options.help || (!positional.length && !options.mode && !process.stdin.isTTY)) { console.log(HELP); return; }
   if (positional.length > 1) throw new Error('只能提供一个课程编号或链接。');
-  if (['courses', 'list'].includes(positional[0])) {
-    throw new Error('课程列表和目录已并入选课流程；运行 mooc-notes 后选择功能和课程。');
-  }
-  if (['export', 'quizzes', 'video-url', 'play'].includes(positional[0])) {
-    throw new Error('旧命令已合并；请使用 mooc-notes [课程] --mode 模式。运行 --help 查看示例。');
-  }
   const loginRequested = positional[0] === 'login';
   const configRequested = positional[0] === 'config';
   let command = loginRequested ? 'login' : configRequested ? 'config' : options.mode || 'notes';
@@ -287,8 +281,8 @@ export async function main(argv) {
     ], '请选择操作');
   }
   const input = loginRequested || configRequested ? undefined : positional[0];
-  if (['url', 'play'].includes(command)) throw new Error('视频链接与播放器操作已合并；请使用 --mode video。');
   if (!['login', 'config', 'notes', 'video'].includes(command)) throw new Error(`未知模式：${command}`);
+  if (input) parseCourseInput(input);
   if (options.mode && (loginRequested || configRequested)) throw new Error(`${command} 不支持 --mode。`);
   if (options.all && command !== 'notes') throw new Error('--all 只适用于 notes 模式。');
   if (options.player && !['video', 'config'].includes(command)) throw new Error('--player 只适用于 video 和 config 模式。');
