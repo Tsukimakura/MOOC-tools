@@ -13,12 +13,13 @@ import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.10.2';
+const VERSION = '0.11.1';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
   mooc-notes                         交互式菜单：选操作、课程和教学小节
   mooc-notes login                   自动尝试登录；需要验证时打开登录页
+  mooc-notes login --manual          直接打开登录页，使用任意手动登录方式
   mooc-notes config                  设置登录账号和默认播放器
   mooc-notes config --player PATH    直接设置默认播放器
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
@@ -47,6 +48,7 @@ PotPlayer 和 mpv 可在播放器中切换中文、英文、双语字幕（取�
   --max-frames NUMBER  每个视频截图上限，默认 160
   --scan-mode MODE     seek（快速跳播，默认）或 realtime（实际播放，适合驻点小测）
   --force              重新采集已完成资源；login 模式强制重新登录
+  --manual             login 模式跳过自动登录，直接打开登录页
   --help               显示帮助
   --version            显示版本`;
 
@@ -64,6 +66,7 @@ function parseArguments(argv) {
     else if (arg === '--headless') options.headless = true;
     else if (arg === '--api-only') options.apiOnly = true;
     else if (arg === '--force') options.force = true;
+    else if (arg === '--manual') options.manual = true;
     else if (arg === '--all') options.all = true;
     else if (names.has(arg)) {
       const value = argv[++index];
@@ -289,6 +292,7 @@ export async function main(argv) {
   if (options.mode && (loginRequested || configRequested)) throw new Error(`${command} 不支持 --mode。`);
   if (options.all && command !== 'notes') throw new Error('--all 只适用于 notes 模式。');
   if (options.player && !['video', 'config'].includes(command)) throw new Error('--player 只适用于 video 和 config 模式。');
+  if (options.manual && command !== 'login') throw new Error('--manual 只适用于 login 模式。');
   if (options.subtitleArg && command !== 'video') throw new Error('--subtitle-arg 只适用于 video 模式。');
   if (options.subtitleArg && !options.subtitleArg.includes('{file}')) throw new Error('--subtitle-arg 必须包含 {file} 占位符。');
   if (options.unit && ['login', 'config'].includes(command)) throw new Error('--unit 不适用于当前命令。');
@@ -303,12 +307,13 @@ export async function main(argv) {
   if (options.apiOnly && options.scanMode === 'realtime') throw new Error('--api-only 与 --scan-mode realtime 不能同时使用。');
   if (command === 'config') { await configure(options); return; }
   if (command === 'login') {
-    const hasEnvironmentCredentials = Boolean(process.env.MOOC_NOTES_USERNAME || process.env.MOOC_NOTES_PASSWORD);
+    const hasEnvironmentCredentials = !options.manual &&
+      Boolean(process.env.MOOC_NOTES_USERNAME || process.env.MOOC_NOTES_PASSWORD);
     if (hasEnvironmentCredentials && !(process.env.MOOC_NOTES_USERNAME && process.env.MOOC_NOTES_PASSWORD)) {
       throw new Error('MOOC_NOTES_USERNAME 和 MOOC_NOTES_PASSWORD 必须同时设置。');
     }
-    const config = hasEnvironmentCredentials ? {} : await readConfig();
-    const credentials = hasEnvironmentCredentials ? {
+    const config = hasEnvironmentCredentials || options.manual ? {} : await readConfig();
+    const credentials = options.manual ? {} : hasEnvironmentCredentials ? {
       username: process.env.MOOC_NOTES_USERNAME, password: process.env.MOOC_NOTES_PASSWORD
     } : { username: config.username, password: config.password };
     console.log(await login(options, credentials));

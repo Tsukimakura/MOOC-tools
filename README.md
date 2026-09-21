@@ -19,6 +19,7 @@ mooc-notes --help
 ```bash
 mooc-notes config  # 按需设置账号密码和默认播放器
 mooc-notes login   # 优先复用会话或自动登录；需要验证时打开登录页
+mooc-notes login --manual  # 直接打开登录页，选择任意手动登录方式
 mooc-notes         # 交互菜单：选操作、课程、教学小节
 ```
 
@@ -27,6 +28,8 @@ mooc-notes         # 交互菜单：选操作、课程、教学小节
 `config` 可在本机保存登录账号、密码和播放器路径。也可用 `mooc-notes config --player '/mnt/c/Program Files/DAUM/PotPlayer/PotPlayerMini64.exe'` 直接设置默认播放器。密码输入不回显；如果不希望保存密码，可同时设置环境变量 `MOOC_NOTES_USERNAME` 和 `MOOC_NOTES_PASSWORD`，登录时会优先使用它们。配置文件保存在用户状态目录 `mooc-notes-cli/config.json`，不是项目目录；密码以明文保存在只有当前用户可读的文件中。运行 `mooc-notes config` 可以清除已保存的账号密码。
 
 `login` 先检查已有会话。配置了手机号或邮箱和密码时，工具会按照登录页当前使用的协议直接发送 HTTPS 请求，并在本机完成密码加密、短时计算验证和登录 Cookie 同步；成功时不会启动浏览器。如果平台要求图片验证码、滑块、短信或账号保护验证，工具会直接打开中国大学 MOOC 的[专用登录页](https://www.icourse163.org/member/login.htm)，预填可用信息，供你完成验证。检测到课程会话后会自动保存并关闭浏览器，不再要求回终端按 Enter。其他账号格式或直接请求暂不可用时，也会回退到同一登录页。切换账号或强制重新登录用 `mooc-notes login --force`。
+
+使用爱课程、校园用户、二维码或第三方账号时，运行 `mooc-notes login --manual`。该命令跳过已有 API 会话、配置账号和自动登录，清除工具浏览器资料中的旧认证 Cookie 后直接打开登录页。你可以在页面选择任意登录方式；登录成功后工具自动保存新会话并关闭浏览器。本机保存的账号密码配置不会被删除。
 
 这里使用的是平台登录页公开加载的个人账号登录流程。平台文档中的[单点登录接口](https://docs.icourse163.org/api-doc/login-intergration.html)需要分配给机构的应用密钥，不适合个人账号。登录页协议发生变化时，直接登录会安全回退到浏览器，不会把明文密码写入日志或错误信息。
 
