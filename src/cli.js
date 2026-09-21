@@ -6,13 +6,13 @@ import { MoocApi, readSession, saveSession, syncBrowserSession } from './api.js'
 import { captureUnit } from './capture.js';
 import { captureDocumentApi, captureVideoApi } from './api_capture.js';
 import { groupLessons, safeName, selectLessons, selectUnits } from './course.js';
-import { openInPlayer } from './player.js';
+import { openInPlayer, preparePlayerSubtitle, subtitleDirectory } from './player.js';
 import { askText, choose } from './prompt.js';
 import { ProgressReporter, withProgress } from './progress.js';
 import { mergeQuestions, missingVideoAnchors } from './quiz.js';
 import { readManifest, saveExport } from './render.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
 
 用法：
@@ -21,7 +21,7 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   mooc-notes [课程] [--mode 模式] [--lesson 小节ID | --unit 资源ID | --all]
 
 模式：notes（默认，图文纪要）、quizzes（小测）、list（目录）、
-      courses（账号课程）、video（获取链接后可选择播放）。
+      courses（账号课程）、video（获取链接后可选择带字幕播放）。
 无课程参数时在终端中选账号课程或手动输入；默认只采集一个教学小节。
 
 课程示例：ZJU1-1460402161、1460402161、
@@ -34,6 +34,7 @@ const HELP = `mooc-notes ${VERSION} — 中国大学 MOOC 图文学习纪要
   --headless           需要网页采集时无界面运行
   --api-only           不启动浏览器；网页专属内容会标记缺失
   --player PATH        video 模式获取链接后直接播放；也可设置 MOOC_NOTES_PLAYER 供交互选择
+  --subtitle-arg TEXT  其他播放器的字幕参数模板，例如 --sub-file={file}
   --output DIR         导出目录，默认 downloads/课程编号-期次
   --lesson TEXT        导出一个教学小节的全部相关资源
   --unit TEXT          只导出匹配名称或 ID 的单项资源
@@ -50,7 +51,7 @@ function parseArguments(argv) {
   const options = {};
   const positional = [];
   const names = new Map([
-    ['--browser', 'browser'], ['--profile', 'profile'], ['--output', 'output'], ['--player', 'player'],
+    ['--browser', 'browser'], ['--profile', 'profile'], ['--output', 'output'], ['--player', 'player'], ['--subtitle-arg', 'subtitleArg'],
     ['--unit', 'unit'], ['--lesson', 'lesson'], ['--mode', 'mode'], ['--interval', 'interval'], ['--threshold', 'threshold'], ['--max-frames', 'maxFrames'], ['--scan-mode', 'scanMode']
   ]);
   for (let index = 0; index < argv.length; index++) {
@@ -63,7 +64,7 @@ function parseArguments(argv) {
     else if (arg === '--all') options.all = true;
     else if (names.has(arg)) {
       const value = argv[++index];
-      if (!value || value.startsWith('--')) throw new Error(`${arg} 需要一个值。`);
+      if (!value || (value.startsWith('--') && arg !== '--subtitle-arg')) throw new Error(`${arg} 需要一个值。`);
       options[names.get(arg)] = value;
     } else if (arg.startsWith('-')) throw new Error(`未知选项：${arg}`);
     else positional.push(arg);
@@ -197,7 +198,9 @@ export async function presentVideoLink(stream, unit, options = {}, ui = {
   ], '视频链接已获取，接下来要做什么？'));
   if (!play) return;
   const player = options.player || options.defaultPlayer || await ui.askText('请输入播放器程序路径或命令');
-  await ui.openInPlayer(player, stream.url);
+  const subtitleFile = await options.loadSubtitle?.();
+  if (!subtitleFile) ui.writeStatus('提示：当前课程会话未提供可读取的字幕，将只播放视频。\n');
+  await ui.openInPlayer(player, stream.url, subtitleFile, options.subtitleArg);
   ui.writeStatus(`已启动播放器：${unit.name}\n`);
 }
 
@@ -247,6 +250,8 @@ export async function main(argv) {
   if (options.mode && loginRequested) throw new Error('login 不支持 --mode。');
   if (options.all && !['notes', 'quizzes'].includes(command)) throw new Error('--all 只适用于 notes 和 quizzes。');
   if (options.player && command !== 'video') throw new Error('--player 只适用于 video 模式。');
+  if (options.subtitleArg && command !== 'video') throw new Error('--subtitle-arg 只适用于 video 模式。');
+  if (options.subtitleArg && !options.subtitleArg.includes('{file}')) throw new Error('--subtitle-arg 必须包含 {file} 占位符。');
   if (options.unit && ['login', 'courses'].includes(command)) throw new Error('--unit 不适用于当前命令。');
   if (options.lesson && !['notes', 'quizzes'].includes(command)) throw new Error('--lesson 只适用于 notes 和 quizzes。');
   if (command === 'courses' && input) throw new Error('查看账号课程无需指定课程。');
@@ -299,7 +304,11 @@ export async function main(argv) {
       await presentVideoLink(stream, unit, {
         player: options.player,
         defaultPlayer: process.env.MOOC_NOTES_PLAYER,
-        interactive: Boolean(process.stdin.isTTY)
+        interactive: Boolean(process.stdin.isTTY),
+        subtitleArg: options.subtitleArg,
+        loadSubtitle: () => withProgress('获取同步字幕', () => preparePlayerSubtitle(
+          api, unit, stream, subtitleDirectory(options.profile, course, unit)
+        ))
       });
       return;
     }

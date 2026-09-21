@@ -1,6 +1,6 @@
 {
   "name": "mooc-notes-cli",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Export personal study notes from China University MOOC courses",
   "type": "module",
   "bin": {
