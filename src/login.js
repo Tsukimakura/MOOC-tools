@@ -149,7 +149,7 @@ export async function login(options = {}, credentials = {}, dependencies = {}) {
     if (clearStored) {
       const authentication = stored.filter((cookie) => AUTH_COOKIES.has(cookie.name));
       if (authentication.length) await background.page.browserContext().deleteCookie(
-        ...authentication.map((cookie) => ({ name: cookie.name, domain: cookie.domain, path: cookie.path }))
+        ...authentication
       );
     }
     if (credentials.username && credentials.password) {

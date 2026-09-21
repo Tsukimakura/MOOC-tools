@@ -75,7 +75,13 @@ test('强制重新登录只清理课程认证 Cookie', async () => {
   const deleted = [];
   background.page.browserContext = () => ({
     cookies: async () => state.value,
-    deleteCookie: async (...items) => { deleted.push(...items.map((item) => item.name)); state.value = []; }
+    deleteCookie: async (...items) => {
+      for (const item of items) {
+        assert.equal(typeof item.value, 'string');
+        deleted.push(item.name);
+      }
+      state.value = [];
+    }
   });
   await login({ force: true }, { username: 'example', password: 'secret' }, {
     launchSession: async () => background,
