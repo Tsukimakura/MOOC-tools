@@ -37,7 +37,7 @@
     "prepack": "npm run validate"
   },
   "dependencies": {
-    "puppeteer-core": "^25.11.0"
+    "puppeteer-core": "^25.12.0"
   },
   "license": "MIT"
 }
