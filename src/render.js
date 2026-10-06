@@ -14,9 +14,16 @@ export async function readManifest(directory, course) {
       throw new Error('输出目录属于另一门课程或不兼容的版本。');
     }
     manifest.schema = 2;
+    manifest.course = {
+      slug: course.slug, termId: course.termId, title: course.title, termName: course.termName
+    };
     return manifest;
   } catch (error) {
-    if (error.code === 'ENOENT') return { schema: 2, course: { slug: course.slug, termId: course.termId, title: course.title }, records: {} };
+    if (error.code === 'ENOENT') return {
+      schema: 2,
+      course: { slug: course.slug, termId: course.termId, title: course.title, termName: course.termName },
+      records: {}
+    };
     throw error;
   }
 }
@@ -45,7 +52,7 @@ function renderQuestion(question, index, prefix = '') {
 export function renderNotes(course, records, { assetPrefix = '' } = {}) {
   const lines = [
     `# ${heading(course.title)}：学习纪要`, '',
-    `课程：${line(course.slug)}　期次：${line(course.termId)}`, '',
+    `课程代码：${line(course.slug)}　期次：${line(course.termName || `期次 ${course.termId}`)}`, '',
     `来源：[中国大学 MOOC](https://www.icourse163.org/course/${encodeURIComponent(course.slug)}?tid=${encodeURIComponent(course.termId)})`, '',
     '本文件按视频时间线排列字幕、截图和驻点小测；课后 Quiz 列在相应课时之后。', '',
     '## 目录', ''
@@ -107,6 +114,14 @@ export function renderQuizIndex(course, records, { assetPrefix = '' } = {}) {
 export function lessonDirectoryName(record) {
   const chapter = String((Number(record.chapterIndex) || 0) + 1).padStart(2, '0');
   const lesson = String((Number(record.lessonIndex) || 0) + 1).padStart(2, '0');
+  const chapterName = safeName(record.chapter).slice(0, 28);
+  const lessonName = safeName(record.lesson).slice(0, 40);
+  return `${chapter}-${lesson}-${chapterName}-${lessonName}`;
+}
+
+function legacyLessonDirectoryName(record) {
+  const chapter = String((Number(record.chapterIndex) || 0) + 1).padStart(2, '0');
+  const lesson = String((Number(record.lessonIndex) || 0) + 1).padStart(2, '0');
   return safeName(`${chapter}-${lesson}-${record.lessonId || record.id}-${record.chapter}-${record.lesson}`);
 }
 
@@ -123,7 +138,7 @@ function lessonGroups(records) {
 export function renderCourseIndex(course, groups) {
   const lines = [
     `# ${heading(course.title)}`, '',
-    `课程：${line(course.slug)}　期次：${line(course.termId)}`, '',
+    `课程代码：${line(course.slug)}　期次：${line(course.termName || `期次 ${course.termId}`)}`, '',
     '## 已导出的教学小节', ''
   ];
   for (const group of groups) {
@@ -148,6 +163,11 @@ export async function saveExport(directory, manifest, course) {
   await atomicWrite(path.join(directory, 'README.md'), renderCourseIndex(course, groups));
   for (const group of groups) {
     const lessonDirectory = path.join(directory, 'lessons', group.directory);
+    const legacyDirectory = path.join(directory, 'lessons', legacyLessonDirectoryName(group.records[0]));
+    if (legacyDirectory !== lessonDirectory) {
+      try { await rename(legacyDirectory, lessonDirectory); }
+      catch (error) { if (!['ENOENT', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error; }
+    }
     await atomicWrite(path.join(lessonDirectory, 'notes.md'), renderNotes(course, group.records, { assetPrefix: '../../' }));
     await atomicWrite(path.join(lessonDirectory, 'quizzes.md'), renderQuizIndex(course, group.records, { assetPrefix: '../../' }));
   }

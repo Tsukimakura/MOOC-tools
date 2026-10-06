@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { launchSession } from './browser.js';
 import { MoocApi, readSession, syncBrowserSession } from './api.js';
@@ -162,7 +162,41 @@ async function configure(options) {
 export function courseOutputDirectory(course, options = {}, config = {}, environment = process.env) {
   if (options.output) return path.resolve(options.output);
   const root = environment.MOOC_NOTES_OUTPUT || config.output || 'downloads';
-  return path.resolve(root, safeName(`${course.slug}-${course.termId}`));
+  const title = safeName(course.title).slice(0, 50);
+  const term = safeName(course.termName || `期次 ${course.termId}`).slice(0, 28);
+  return path.resolve(root, `${title}-${term}`);
+}
+
+export async function resolveCourseOutputDirectory(course, options = {}, config = {}, environment = process.env) {
+  let directory = courseOutputDirectory(course, options, config, environment);
+  if (options.output) return directory;
+  const root = environment.MOOC_NOTES_OUTPUT || config.output || 'downloads';
+  const legacy = path.resolve(root, safeName(`${course.slug}-${course.termId}`));
+  if (legacy === directory) return directory;
+  try {
+    await access(directory);
+    try {
+      const saved = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
+      if (saved?.course?.slug !== course.slug || saved?.course?.termId !== course.termId) {
+        directory = path.resolve(root, `${path.basename(directory)} [tid ${course.termId}]`);
+      } else return directory;
+    } catch (error) {
+      if (error.code === 'ENOENT' || error instanceof SyntaxError) return directory;
+      throw error;
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  try {
+    await access(legacy);
+  } catch (error) {
+    if (error.code === 'ENOENT') return directory;
+    throw error;
+  }
+  await mkdir(path.dirname(directory), { recursive: true });
+  await rename(legacy, directory);
+  process.stderr.write(`已迁移旧下载目录：${legacy} → ${directory}\n`);
+  return directory;
 }
 
 async function chooseCourse(api) {
@@ -172,7 +206,7 @@ async function chooseCourse(api) {
   catch (error) { process.stderr.write(`账号课程列表暂不可用：${error.message}\n`); }
   if (!courses.length) return askText('请输入课程代码或链接');
   const selected = await choose(courses.map((course) => ({
-    label: `${course.title} · ${course.slug} · tid=${course.termId}`,
+    label: `${course.title} · ${course.termName} · ${course.slug}`,
     value: course.url
   })), '选择课程', { manualLabel: '手动输入课程代码或链接' });
   return selected || askText('请输入课程代码或链接');
@@ -381,7 +415,7 @@ export async function main(argv) {
       return;
     }
     const resources = await chooseResources(course, options);
-    const directory = courseOutputDirectory(course, options, await readConfig());
+    const directory = await resolveCourseOutputDirectory(course, options, await readConfig());
     const manifest = await readManifest(directory, course);
     for (const [index, unit] of resources.entries()) {
       const previous = manifest.records[unit.id];

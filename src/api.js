@@ -169,12 +169,14 @@ export class MoocApi {
         courses.find((item) => item.slug.endsWith(`-${id}`));
       if (!account) throw new Error('账号课程中找不到该课程的期次；请确认已参加课程，或传入包含 tid 的完整链接。');
     } else {
-      account = { slug: parsed.slug, termId: parsed.termId, title: '' };
+      account = { slug: parsed.slug, termId: parsed.termId, title: '', termName: '' };
     }
     const data = await this.rpc('courseBean.getLastLearnedMocTermDto', { termId: account.termId });
     const raw = data?.result?.mocTermDto || data?.result?.termDto;
     if (!raw) throw new Error('课程目录不可用。请确认已登录、参加此期课程，并检查 tid；平台可能调整了接口。');
-    const course = normalizeCourse(raw, { slug: account.slug, termId: account.termId, title: account.title });
+    const course = normalizeCourse(raw, {
+      slug: account.slug, termId: account.termId, title: account.title, termName: account.termName
+    });
     if (!course.units.length) throw new Error('课程目录中没有已发布的视频、文档或测验。');
     return course;
   }

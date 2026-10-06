@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseResources, courseOutputDirectory, main, mergeCapturedRecord, presentVideoLink } from '../src/cli.js';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { chooseResources, courseOutputDirectory, main, mergeCapturedRecord, presentVideoLink, resolveCourseOutputDirectory } from '../src/cli.js';
 
 test('统一命令显示模式与课程样例，并拒绝无效课程或模式', async () => {
   const original = console.log;
@@ -29,10 +32,27 @@ test('统一命令显示模式与课程样例，并拒绝无效课程或模式',
 });
 
 test('输出目录支持默认根目录、环境变量和本次覆盖', () => {
-  const course = { slug: 'TEST-1', termId: '2' };
-  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, {}), '/saved/root/TEST-1-2');
-  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, { MOOC_NOTES_OUTPUT: '/env/root' }), '/env/root/TEST-1-2');
+  const course = { slug: 'TEST-1', termId: '2', title: '数据结构：进阶', termName: '2026 秋季' };
+  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, {}), '/saved/root/数据结构_进阶-2026 秋季');
+  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, { MOOC_NOTES_OUTPUT: '/env/root' }), '/env/root/数据结构_进阶-2026 秋季');
   assert.equal(courseOutputDirectory(course, { output: '/one/course' }, { output: '/saved/root' }, {}), '/one/course');
+});
+
+test('首次写入新命名目录时迁移旧课程目录', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mooc-output-name-'));
+  const course = { slug: 'TEST-1', termId: '2', title: '演示课程', termName: '第 3 次开课' };
+  const legacy = path.join(root, 'TEST-1-2');
+  try {
+    await mkdir(legacy);
+    await writeFile(path.join(legacy, 'marker'), 'kept');
+    const originalWrite = process.stderr.write;
+    process.stderr.write = () => true;
+    let directory;
+    try { directory = await resolveCourseOutputDirectory(course, {}, { output: root }, {}); }
+    finally { process.stderr.write = originalWrite; }
+    assert.equal(directory, path.join(root, '演示课程-第 3 次开课'));
+    assert.equal(await readFile(path.join(directory, 'marker'), 'utf8'), 'kept');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('获取视频链接后按选择播放，非交互调用不会等待输入', async () => {

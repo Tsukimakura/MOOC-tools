@@ -31,7 +31,7 @@ export function normalizeAccountCourses(items) {
     if (seen.has(key)) return [];
     seen.add(key);
     return [{
-      title: String(item.name || slug), slug, termId,
+      title: String(item.name || slug), slug, termId, termName: readableTermName(item.termPanel, termId),
       school: String(item.schoolPanel?.name || ''),
       url: `https://${HOST}/learn/${slug}?tid=${termId}`
     }];
@@ -89,14 +89,44 @@ export function normalizeCourse(raw, details = {}) {
     }
   }
   const seen = new Set();
+  const title = String(details.title || raw.courseName || raw.course?.name || raw.name || slug);
+  const fallbackTermName = termId ? `期次 ${termId}` : '';
+  const accountTermName = details.termName === fallbackTermName ? '' : details.termName;
+  const termName = accountTermName || (raw.courseName && raw.name !== raw.courseName ? raw.name : '');
   return {
-    slug, termId, title: String(details.title || raw.courseName || raw.name || slug),
+    slug, termId, title,
+    termName: readableTermName({
+      termName: raw.termName,
+      termTitle: raw.termTitle,
+      startTime: raw.startTime ?? raw.startDate ?? raw.beginTime,
+      endTime: raw.endTime ?? raw.endDate ?? raw.closeTime
+    }, termId, termName, title),
     units: units.filter((unit) => {
       if (seen.has(unit.id)) return false;
       seen.add(unit.id);
       return true;
     })
   };
+}
+
+export function readableTermName(source, termId = '', preferred = '', courseTitle = '') {
+  const candidates = [source?.termName, source?.termTitle, preferred, source?.name, source?.title]
+    .map((value) => String(value || '').replace(/\s+/g, ' ').trim())
+    .filter((value) => value && value !== courseTitle && value !== String(termId));
+  if (candidates.length) return candidates[0];
+
+  const date = (value) => {
+    const number = Number(value);
+    const parsed = Number.isFinite(number) && number > 0
+      ? new Date(number < 10_000_000_000 ? number * 1000 : number)
+      : new Date(value);
+    return Number.isNaN(parsed.valueOf()) ? '' : parsed.toISOString().slice(0, 10);
+  };
+  const start = date(source?.startTime ?? source?.startDate ?? source?.beginTime);
+  const end = date(source?.endTime ?? source?.endDate ?? source?.closeTime);
+  if (start && end) return `${start} 至 ${end}`;
+  if (start) return `${start} 开课`;
+  return termId ? `期次 ${termId}` : '未知期次';
 }
 
 export function unitType(unit) {
