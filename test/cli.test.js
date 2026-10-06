@@ -33,24 +33,22 @@ test('统一命令显示模式与课程样例，并拒绝无效课程或模式',
 
 test('输出目录支持默认根目录、环境变量和本次覆盖', () => {
   const course = { slug: 'TEST-1', termId: '2', title: '数据结构：进阶', termName: '2026 秋季' };
-  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, {}), '/saved/root/数据结构_进阶-2026 秋季');
-  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, { MOOC_NOTES_OUTPUT: '/env/root' }), '/env/root/数据结构_进阶-2026 秋季');
+  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, {}), '/saved/root/TEST-1');
+  assert.equal(courseOutputDirectory({ ...course, title: 'Advanced Data Structures' }, {}, { output: '/saved/root' }, {}), '/saved/root/Advanced Data Structures');
+  assert.equal(courseOutputDirectory(course, {}, { output: '/saved/root' }, { MOOC_NOTES_OUTPUT: '/env/root' }), '/env/root/TEST-1');
   assert.equal(courseOutputDirectory(course, { output: '/one/course' }, { output: '/saved/root' }, {}), '/one/course');
 });
 
-test('首次写入新命名目录时迁移旧课程目录', async () => {
+test('再次导出时复用已有课程目录而不重命名', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'mooc-output-name-'));
   const course = { slug: 'TEST-1', termId: '2', title: '演示课程', termName: '第 3 次开课' };
-  const legacy = path.join(root, 'TEST-1-2');
+  const legacy = path.join(root, '演示课程-第 3 次开课');
   try {
     await mkdir(legacy);
     await writeFile(path.join(legacy, 'marker'), 'kept');
-    const originalWrite = process.stderr.write;
-    process.stderr.write = () => true;
-    let directory;
-    try { directory = await resolveCourseOutputDirectory(course, {}, { output: root }, {}); }
-    finally { process.stderr.write = originalWrite; }
-    assert.equal(directory, path.join(root, '演示课程-第 3 次开课'));
+    await writeFile(path.join(legacy, 'manifest.json'), JSON.stringify({ course: { slug: 'TEST-1', termId: '2' } }));
+    const directory = await resolveCourseOutputDirectory(course, {}, { output: root }, {});
+    assert.equal(directory, legacy);
     assert.equal(await readFile(path.join(directory, 'marker'), 'utf8'), 'kept');
   } finally { await rm(root, { recursive: true, force: true }); }
 });

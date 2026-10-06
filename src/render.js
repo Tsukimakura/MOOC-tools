@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { safeName } from './course.js';
 import { formatTime } from './subtitles.js';
 
@@ -114,15 +114,22 @@ export function renderQuizIndex(course, records, { assetPrefix = '' } = {}) {
 export function lessonDirectoryName(record) {
   const chapter = String((Number(record.chapterIndex) || 0) + 1).padStart(2, '0');
   const lesson = String((Number(record.lessonIndex) || 0) + 1).padStart(2, '0');
-  const chapterName = safeName(record.chapter).slice(0, 28);
-  const lessonName = safeName(record.lesson).slice(0, 40);
-  return `${chapter}-${lesson}-${chapterName}-${lessonName}`;
+  const names = [record.chapter, record.lesson]
+    .filter((value) => value && !/\p{Script=Han}/u.test(value))
+    .map((value) => safeName(value).slice(0, 32));
+  return [chapter, lesson, ...names].join('-');
 }
 
-function legacyLessonDirectoryName(record) {
+function idLessonDirectoryName(record) {
   const chapter = String((Number(record.chapterIndex) || 0) + 1).padStart(2, '0');
   const lesson = String((Number(record.lessonIndex) || 0) + 1).padStart(2, '0');
   return safeName(`${chapter}-${lesson}-${record.lessonId || record.id}-${record.chapter}-${record.lesson}`);
+}
+
+function readableLessonDirectoryName(record) {
+  const chapter = String((Number(record.chapterIndex) || 0) + 1).padStart(2, '0');
+  const lesson = String((Number(record.lessonIndex) || 0) + 1).padStart(2, '0');
+  return `${chapter}-${lesson}-${safeName(record.chapter).slice(0, 28)}-${safeName(record.lesson).slice(0, 40)}`;
 }
 
 function lessonGroups(records) {
@@ -157,17 +164,23 @@ export function renderCourseIndex(course, groups) {
 export async function saveExport(directory, manifest, course) {
   const records = course.units.map((unit) => manifest.records[unit.id]).filter(Boolean);
   const groups = lessonGroups(records);
+  for (const group of groups) {
+    const first = group.records[0];
+    for (const candidate of [readableLessonDirectoryName(first), idLessonDirectoryName(first)]) {
+      if (candidate === group.directory) continue;
+      try {
+        await access(path.join(directory, 'lessons', candidate));
+        group.directory = candidate;
+        break;
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+  }
   await atomicWrite(path.join(directory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   await atomicWrite(path.join(directory, 'notes.md'), renderNotes(course, records));
   await atomicWrite(path.join(directory, 'quizzes.md'), renderQuizIndex(course, records));
   await atomicWrite(path.join(directory, 'README.md'), renderCourseIndex(course, groups));
   for (const group of groups) {
     const lessonDirectory = path.join(directory, 'lessons', group.directory);
-    const legacyDirectory = path.join(directory, 'lessons', legacyLessonDirectoryName(group.records[0]));
-    if (legacyDirectory !== lessonDirectory) {
-      try { await rename(legacyDirectory, lessonDirectory); }
-      catch (error) { if (!['ENOENT', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error; }
-    }
     await atomicWrite(path.join(lessonDirectory, 'notes.md'), renderNotes(course, group.records, { assetPrefix: '../../' }));
     await atomicWrite(path.join(lessonDirectory, 'quizzes.md'), renderQuizIndex(course, group.records, { assetPrefix: '../../' }));
   }

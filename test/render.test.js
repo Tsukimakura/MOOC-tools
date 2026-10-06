@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { lessonDirectoryName, readManifest, renderNotes, renderQuizIndex, saveExport } from '../src/render.js';
@@ -35,7 +35,7 @@ test('完整导出在中断后可读取清单继续', async () => {
     const lessonDirectory = path.join(directory, 'lessons', lessonDirectoryName(record));
     assert.match(await readFile(path.join(directory, 'README.md'), 'utf8'), /图文纪要/);
     assert.match(await readFile(path.join(directory, 'README.md'), 'utf8'), /期次：2026 秋季/);
-    assert.doesNotMatch(lessonDirectoryName(record), /(?:^|-)3(?:-|$)/);
+    assert.equal(lessonDirectoryName(record), '01-01');
     assert.match(await readFile(path.join(lessonDirectory, 'notes.md'), 'utf8'), /\.\.\/\.\.\/assets\/3\/frame-0001\.png/);
     assert.match(await readFile(path.join(lessonDirectory, 'quizzes.md'), 'utf8'), /小测问题？/);
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -62,5 +62,22 @@ test('不同教学小节分别生成文档且保留课程合并纪要', async ()
     assert.match(secondNotes, /第二节字幕/);
     assert.match(combined, /先说这句话/);
     assert.match(combined, /第二节字幕/);
+    assert.deepEqual([lessonDirectoryName(record), lessonDirectoryName(another)], ['01-01', '01-02']);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('已有教学小节目录原地复用且不重命名', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'mooc-notes-existing-'));
+  const existingName = '01-01-第一章-第一节';
+  try {
+    const existing = path.join(directory, 'lessons', existingName);
+    await mkdir(existing, { recursive: true });
+    await writeFile(path.join(existing, 'marker'), 'kept');
+    const manifest = await readManifest(directory, course);
+    manifest.records[record.id] = record;
+    await saveExport(directory, manifest, course);
+    assert.equal(await readFile(path.join(existing, 'marker'), 'utf8'), 'kept');
+    await assert.rejects(access(path.join(directory, 'lessons', '01-01')));
+    assert.match(await readFile(path.join(directory, 'README.md'), 'utf8'), /01-01-%E7%AC%AC%E4%B8%80%E7%AB%A0-%E7%AC%AC%E4%B8%80%E8%8A%82/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

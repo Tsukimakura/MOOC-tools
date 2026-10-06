@@ -45,8 +45,8 @@ test('目录跨章节标准化并生成示例课时链接', () => {
   assert.deepEqual(selectLessons(lessons, '1278585470')[0].units.map((unit) => unit.id), ['1320673525', '1320673528']);
 });
 
-test('期次名称可由日期生成，并在无元数据时明确回退', () => {
-  assert.equal(readableTermName({ startTime: Date.UTC(2026, 8, 1), endTime: Date.UTC(2027, 0, 8) }, '9'), '2026-09-01 至 2027-01-08');
+test('期次名称不根据日期生成，并在无名称时明确回退', () => {
+  assert.equal(readableTermName({ startTime: Date.UTC(2026, 8, 1), endTime: Date.UTC(2027, 0, 8) }, '9'), '期次 9');
   assert.equal(readableTermName({}, '9'), '期次 9');
   const course = normalizeCourse({ id: 9, termName: '平台期次', chapters: [] }, {
     slug: 'TEST-1', termId: '9', title: '课程', termName: '期次 9'

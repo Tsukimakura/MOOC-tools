@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { launchSession } from './browser.js';
 import { MoocApi, readSession, syncBrowserSession } from './api.js';
@@ -162,41 +162,45 @@ async function configure(options) {
 export function courseOutputDirectory(course, options = {}, config = {}, environment = process.env) {
   if (options.output) return path.resolve(options.output);
   const root = environment.MOOC_NOTES_OUTPUT || config.output || 'downloads';
-  const title = safeName(course.title).slice(0, 50);
-  const term = safeName(course.termName || `期次 ${course.termId}`).slice(0, 28);
-  return path.resolve(root, `${title}-${term}`);
+  const title = /\p{Script=Han}/u.test(course.title) ? course.slug : course.title;
+  return path.resolve(root, safeName(title));
 }
 
 export async function resolveCourseOutputDirectory(course, options = {}, config = {}, environment = process.env) {
-  let directory = courseOutputDirectory(course, options, config, environment);
-  if (options.output) return directory;
-  const root = environment.MOOC_NOTES_OUTPUT || config.output || 'downloads';
-  const legacy = path.resolve(root, safeName(`${course.slug}-${course.termId}`));
-  if (legacy === directory) return directory;
-  try {
-    await access(directory);
+  const preferred = courseOutputDirectory(course, options, config, environment);
+  if (options.output) return preferred;
+  const root = path.resolve(environment.MOOC_NOTES_OUTPUT || config.output || 'downloads');
+  const belongsToCourse = async (directory) => {
     try {
       const saved = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
-      if (saved?.course?.slug !== course.slug || saved?.course?.termId !== course.termId) {
-        directory = path.resolve(root, `${path.basename(directory)} [tid ${course.termId}]`);
-      } else return directory;
+      return saved?.course?.slug === course.slug && saved?.course?.termId === course.termId;
     } catch (error) {
-      if (error.code === 'ENOENT' || error instanceof SyntaxError) return directory;
+      if (error.code === 'ENOENT' || error instanceof SyntaxError) return false;
       throw error;
+    }
+  };
+  const legacy = path.resolve(root, safeName(`${course.slug}-${course.termId}`));
+  for (const directory of new Set([preferred, legacy])) {
+    if (await belongsToCourse(directory)) return directory;
+  }
+  try {
+    const entries = await readdir(root, { withFileTypes: true });
+    for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+      const directory = path.join(root, entry.name);
+      if (await belongsToCourse(directory)) return directory;
     }
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
   try {
-    await access(legacy);
+    const saved = JSON.parse(await readFile(path.join(preferred, 'manifest.json'), 'utf8'));
+    if (saved?.course?.slug !== course.slug || saved?.course?.termId !== course.termId) {
+      return path.resolve(root, `${path.basename(preferred)} [tid ${course.termId}]`);
+    }
   } catch (error) {
-    if (error.code === 'ENOENT') return directory;
-    throw error;
+    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
   }
-  await mkdir(path.dirname(directory), { recursive: true });
-  await rename(legacy, directory);
-  process.stderr.write(`已迁移旧下载目录：${legacy} → ${directory}\n`);
-  return directory;
+  return preferred;
 }
 
 async function chooseCourse(api) {
